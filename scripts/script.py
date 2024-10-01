@@ -1,6 +1,6 @@
 # Objective: This script was written to test a set of image processing steps on Python
 import skimage as ski #pip install -U scikit-image
-from skimage import color
+from skimage import color,measure,morphology
 import os
 import scipy as sp
 from pathlib import Path
@@ -12,13 +12,23 @@ import matplotlib
 matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
 outputfiles = list(Path(Path.home() / 'Documents'/'My CytoSense'/'Outputfiles').expanduser().rglob('*.jpg'))
-re.c('_background.jpg', outputfiles[0].name)
-background,imagefiles=ski.io.imread(list(filter(lambda x: '_background.jpg' in x.name, outputfiles))[0],as_gray=True),list(filter(lambda x: '_background.jpg' not in x.name, outputfiles))
-image = ski.io.imread(imagefiles[0],as_gray=True)
 
-plt.imshow(image, cmap='gray')
+backgroundfiles,imagefiles=list(filter(lambda x: '_background.jpg' in x.name, outputfiles)),list(filter(lambda x: '_background.jpg' not in x.name, outputfiles))
+file=imagefiles[1774]
+image = ski.io.imread(file,as_gray=True)
+background=ski.io.imread('_'.join(str(file).rsplit('_')[:-2])+'_background.jpg',as_gray=True)
+plt.imshow(image-background, cmap='gray')
 plt.figure()
+plt.imshow(background, cmap='gray')
+markers = np.zeros_like(image)
+markers[image-background >7] = 1
+labelled = measure.label(markers)
+largestCC = labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
+rp = measure.regionprops(labelled)
+[obj.area for obj in rp]
+
 edges = ski.filters.sobel(image)
+
 #Canny edge detection
 edges=ski.feature.canny(image,sigma=0.003 )
 plt.imshow(edges, cmap='gray')
@@ -38,7 +48,8 @@ markers[image <  np.quantile(image,0.05)] = 1
 markers[image >=  np.quantile(image,0.99)] = 2
 label_objects, nb_labels = sp.ndimage.label(markers)
 plt.imshow(label_objects)
-large_markers = ski.morphology.remove_small_objects(label_objects, min_size=25)
+largest_object_size=np.bincount(largestCC.flat)[1]
+large_markers = ski.morphology.remove_small_objects(label_objects, min_size=largest_object_size/2)
 plt.figure()
 plt.imshow(large_markers)
 #Filtering smallest objects
