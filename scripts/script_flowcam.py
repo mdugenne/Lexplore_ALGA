@@ -28,6 +28,9 @@ my_cmap.set_bad(alpha=0) # set how the colormap handles 'bad' values
 import warnings
 warnings.filterwarnings("ignore")
 from natsort import natsorted
+#Digits recognition
+import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
+pytesseract.pytesseract.tesseract_cmd = r'C:\Users\dugenne\AppData\Local\Programs\Tesseract-OCR\tesseract'
 
 #Workflow starts here
 path_to_network=Path("R:") # Set working directory to forel-meco
@@ -36,16 +39,80 @@ outputfiles = list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' ).ex
 backgroundfiles,imagefiles=list(filter(lambda x: 'cal_' in x.name, outputfiles)),list(filter(lambda x: 'rawfile_' in x.name, outputfiles))
 # Load metadata files (volume imaged, background pixel intensity, etc.)
 metadatafiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_10x_lexplore*/*_summary.csv'))
-df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.drop(index=[0]).reset_index(drop=True).query('not Name.str.contains(r"\:|End",case=True)'),df:=df.assign(Name=np.where(df.Name.str.contains(r"\=",case=True).shift(1,fill_value=False),((df.loc[:5,'Name'].values.tolist()+(df.Name[3:-1].values+df.Name[4:].values).tolist())),df.Name)),df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_')).set_index('Name').T.rename(index={'Value':file.parent.name}))[-1],metadatafiles))
+df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.drop(index=[0]).reset_index(drop=True).query('not Name.str.contains(r"\:|End",case=True)'),df:=df.assign(Name=np.where(df.Name.str.contains(r"\=",case=True).shift(1,fill_value=False),((df.loc[:5,'Name'].values.tolist()+(df.Name[3:-1].values+df.Name[4:].values).tolist())),df.Name)),df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_')).set_index('Name').T.rename(index={'Value':file.parent.name}),df:=df.rename(columns=dict(zip(df.columns,df.columns.tolist()[:-1]+['Metadata_Statistics_Values']))) if df.index[0]==df.columns[-1] else df)[-1],metadatafiles))
 df_metadata=df_metadata.rename(columns={df_metadata.columns[-1]:'Metadata_Statistics_values','Filter_GridName':'Filter_Grid_Name'})
 df_pixel=df_metadata[['Magnification','Calibration_Factor']]
 
 # Load context file for cropping area
 contextfiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' ).rglob('*.ctx'))
 df_context=pd.concat(map(lambda file:pd.read_csv(file,sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains("\[",case=True)').set_index('Name').T.rename(index={'Value':file.parent.name}),contextfiles))
-
 df_cropping=df_context[['AcceptableTop','AcceptableBottom','AcceptableLeft','AcceptableRight']]
-file=natsorted(imagefiles)[-1]#Path('R:Imaging_Flowcam/Flowcam data/Lexplore/Flowcam_10x_lexplore_wasam_20241002_2024-10-03 07-23-04/rawfile_011039.tif')#imagefiles[538]
+
+
+## Processing vignettes mosaic
+file=Path(r"R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\Flowcam_10x_lexplore_wasam_20241002_2024-10-09_glut\collage_70.png")#imagefiles[538]
+sample_id=file.parent.name
+image,colored_image = ski.io.imread(file,as_gray=True),ski.io.imread(file,as_gray=False)
+plt.imshow(image, cmap='gray')
+
+mask = image < filters.threshold_otsu(image)
+edges = ski.filters.sobel(image)
+mask= sp.ndimage.binary_fill_holes(edges)==False
+
+plt.figure()
+plt.imshow(mask, cmap='gray')
+
+labelled = measure.label(mask,background=1)
+plt.figure()
+plt.imshow(labelled)
+# Measure properties
+df_properties=pd.DataFrame(ski.measure.regionprops_table(label_image=labelled,intensity_image=image,properties=['area_convex','area_bbox','axis_major_length','axis_minor_length','bbox','extent','slice']))
+# Identify and plot rectangular regions (=vignettes), except for the last two corresponding to the period in the bottom sentence displayed on the mosaic ('Property shown : Capture ID')
+rect_idx=df_properties.query('(area_convex==area_bbox) & (extent==1)').index[:-2]+1
+plt.figure()
+plt.imshow(np.where(np.in1d(labelled,rect_idx).reshape(labelled.shape),image,0), cmap='gray')
+
+labelid_idx=df_properties.query('(area_convex!=area_bbox) & (extent!=1)').index[:-4]+1
+id_of_interest=4
+capture_id=np.pad(np.where(np.in1d(labelled,labelid_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[labelid_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
+
+fig,axes=plt.subplots(1,1)
+plt.imshow(capture_id, cmap='gray')
+axes.set_axis_off()
+ski.filters.try_all_threshold(capture_id)
+binary= capture_id < ski.filters.threshold_isodata(capture_id)
+binary= capture_id < ski.filters.threshold_minimum(capture_id)
+binary= capture_id < ski.filters.threshold_otsu(capture_id)
+plt.imshow(binary, cmap='gray')
+
+
+particle_id=pytesseract.image_to_string(binary,config= r'--psm 10')
+pytesseract.image_to_string(binary,config= r'digits')
+pytesseract.image_to_string(capture_id==0,config= r'--psm 10')
+plt.imshow(capture_id==0, cmap='gray')
+
+print(pytesseract.image_to_string(np.where(np.in1d(labelled,labelid_idx[0]).reshape(labelled.shape),image,0),config='--psm 13 outputbase digits'))
+
+#Split the mosaic according to the slices of rectangular regions
+pixel_size=df_pixel.Calibration_Factor.str.strip(' ').astype(float) #in microns per pixel
+
+fig,axes=plt.subplots(1,1)
+plt.imshow(colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)], cmap='gray')
+axes.set_axis_off()
+scale_value=50
+scalebar=AnchoredSizeBar(transform=axes.transData,size=scale_value/pixel_size.loc[sample_id],
+                           label='{} $\mu$m'.format(scale_value), loc='lower left',
+                           pad=0.1,
+                           color='white',
+                           frameon=False,
+                           fontproperties=fontprops)
+ax[0].add_artist(scalebar)
+ax[0].set_title(particle_id)
+fig.savefig(fname=str(file.parent / '{}.png'.format(particle_id)))
+
+## Processing raw images
+# Load image file
+file=natsorted(imagefiles)[-1]#Path('R:Imaging_Flowcam/Flowcam data/Lexplore/acquisitions/Flowcam_10x_lexplore_wasam_20241002_2024-10-03 07-23-04/rawfile_011039.tif')#imagefiles[538]
 sample_id=file.parent.name
 cropping_area=df_cropping.loc['Lexplore']
 colored_image=ski.io.imread(file,)[int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]
