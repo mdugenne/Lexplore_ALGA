@@ -8,7 +8,6 @@ from skimage.util import compare_images,crop
 import os
 import scipy as sp
 from pathlib import Path
-import matplotlib.pyplot as mtp
 from PIL import Image
 import numpy as np
 
@@ -30,17 +29,27 @@ warnings.filterwarnings("ignore")
 from natsort import natsorted
 #Digits recognition
 import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
-pytesseract.pytesseract.tesseract_cmd = r'C:\Users\dugenne\AppData\Local\Programs\Tesseract-OCR\tesseract'
+pytesseract.pytesseract.tesseract_cmd = r'~\AppData\Local\Programs\Tesseract-OCR\tesseract'
+from tqdm import tqdm
+
+# Identification of the variables of interest in visualspreadsheet summary tables
+summary_metadata_columns=['Mode', 'Priming_Method', 'Flow_Rate', 'Recalibrations', 'Stop_Reason',
+       'Sample_Volume_Aspirated', 'Sample_Volume_Processed',
+       'Fluid_Volume_Imaged', 'Efficiency', 'Particle_Count', 'Total', 'Used',
+       'Percentage_Used', 'Particles_Per_Image', 'Frame_Rate',
+       'Background_Intensity_Mean', 'Background_Intensity_Min',
+       'Background_Intensity_Max', 'Start_Time', 'Sampling_Time',
+       'Environment', 'Software', 'Magnification', 'Calibration_Factor',
+       'SerialNo', 'Number_of_Processors', 'Pump', 'Syringe_Size']
 
 #Workflow starts here
 path_to_network=Path("R:") # Set working directory to forel-meco
-# Load raw and calibration images
-outputfiles = list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' ).expanduser().rglob('Flowcam_10x_lexplore*/*.tif'))
-backgroundfiles,imagefiles=list(filter(lambda x: 'cal_' in x.name, outputfiles)),list(filter(lambda x: 'rawfile_' in x.name, outputfiles))
 # Load metadata files (volume imaged, background pixel intensity, etc.)
 metadatafiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_10x_lexplore*/*_summary.csv'))
-df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.drop(index=[0]).reset_index(drop=True).query('not Name.str.contains(r"\:|End",case=True)'),df:=df.assign(Name=np.where(df.Name.str.contains(r"\=",case=True).shift(1,fill_value=False),((df.loc[:5,'Name'].values.tolist()+(df.Name[3:-1].values+df.Name[4:].values).tolist())),df.Name)),df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_')).set_index('Name').T.rename(index={'Value':file.parent.name}),df:=df.rename(columns=dict(zip(df.columns,df.columns.tolist()[:-1]+['Metadata_Statistics_Values']))) if df.index[0]==df.columns[-1] else df)[-1],metadatafiles))
-df_metadata=df_metadata.rename(columns={df_metadata.columns[-1]:'Metadata_Statistics_values','Filter_GridName':'Filter_Grid_Name'})
+df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name}))[summary_metadata_columns])[-1],metadatafiles),axis=0)
+df_particle_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).reset_index(drop=True),df:=df[df.query('Name.str.contains(r"\=",case=True)').index[0]:].reset_index(drop=True) ,df_summary_statistics:=pd.DataFrame([(df.query('Name.str.contains(r"\=",case=True)').index).tolist(),((df.query('Name.str.contains(r"\=",case=True)').index)[1:]-1).tolist()+[len(df)]]).T.apply(lambda id:pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),df.loc[id[0]+1:id[1],'Value'].values.tolist()[1].split(','))),index=[file.parent.name]) if len(df.loc[id[0]+1:id[1],'Value'].values.tolist())>1 else pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),[np.nan]*len(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(',')))),index=[file.parent.name]),axis=1,result_type='reduce')[0])[-1],metadatafiles),axis=0)
+df_filter_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).reset_index(drop=True),df:=df[df.query('Name.str.contains(r"\=",case=True)').index[0]:].reset_index(drop=True) ,df_summary_statistics:=pd.DataFrame([(df.query('Name.str.contains(r"\=",case=True)').index).tolist(),((df.query('Name.str.contains(r"\=",case=True)').index)[1:]-1).tolist()+[len(df)]]).T.apply(lambda id:pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),df.loc[id[0]+1:id[1],'Value'].values.tolist()[1].split(','))),index=[file.parent.name]) if len(df.loc[id[0]+1:id[1],'Value'].values.tolist())>1 else pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),[np.nan]*len(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(',')))),index=[file.parent.name]),axis=1,result_type='reduce')[1])[-1],metadatafiles),axis=0)
+df_summary_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).reset_index(drop=True),df:=df[df.query('Name.str.contains(r"\=",case=True)').index[0]:].reset_index(drop=True) ,df_summary_statistics:=pd.DataFrame([(df.query('Name.str.contains(r"\=",case=True)').index).tolist(),((df.query('Name.str.contains(r"\=",case=True)').index)[1:]-1).tolist()+[len(df)]]).T.apply(lambda id:pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),df.loc[id[0]+1:id[1],'Value'].values.tolist()[1].split(','))),index=[file.parent.name]) if len(df.loc[id[0]+1:id[1],'Value'].values.tolist())>1 else pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),[np.nan]*len(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(',')))),index=[file.parent.name]),axis=1,result_type='reduce')[2])[-1],metadatafiles),axis=0)
 df_pixel=df_metadata[['Magnification','Calibration_Factor']]
 
 # Load context file for cropping area
@@ -48,69 +57,94 @@ contextfiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' ).rgl
 df_context=pd.concat(map(lambda file:pd.read_csv(file,sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains("\[",case=True)').set_index('Name').T.rename(index={'Value':file.parent.name}),contextfiles))
 df_cropping=df_context[['AcceptableTop','AcceptableBottom','AcceptableLeft','AcceptableRight']]
 
-
 ## Processing vignettes mosaic
-file=Path(r"R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\Flowcam_10x_lexplore_wasam_20241002_2024-10-09_glut\collage_70.png")#imagefiles[538]
-sample_id=file.parent.name
-image,colored_image = ski.io.imread(file,as_gray=True),ski.io.imread(file,as_gray=False)
-plt.imshow(image, cmap='gray')
 
-mask = image < filters.threshold_otsu(image)
-edges = ski.filters.sobel(image)
-mask= sp.ndimage.binary_fill_holes(edges)==False
+runfiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions' ).expanduser().glob('Flowcam_10x_lexplore*')))#Path(r"R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\Flowcam_10x_lexplore_wasam_20241002_2024-10-09_glut\collage_70.png")#imagefiles[538]
 
-plt.figure()
-plt.imshow(mask, cmap='gray')
+mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_*.png')))),runfiles))
 
-labelled = measure.label(mask,background=1)
-plt.figure()
-plt.imshow(labelled)
-# Measure properties
-df_properties=pd.DataFrame(ski.measure.regionprops_table(label_image=labelled,intensity_image=image,properties=['area_convex','area_bbox','axis_major_length','axis_minor_length','bbox','extent','slice']))
-# Identify and plot rectangular regions (=vignettes), except for the last two corresponding to the period in the bottom sentence displayed on the mosaic ('Property shown : Capture ID')
-rect_idx=df_properties.query('(area_convex==area_bbox) & (extent==1)').index[:-2]+1
-plt.figure()
-plt.imshow(np.where(np.in1d(labelled,rect_idx).reshape(labelled.shape),image,0), cmap='gray')
+for sample in list(mosaicfiles.keys()):
+    particle_id = 0
+    with tqdm(desc='Generating vignettes for run {}'.format(sample), total=len(mosaicfiles[sample]), bar_format='{desc}{bar}', position=0, leave=True) as bar:
+        for file in mosaicfiles[sample]:
+            percent = np.round(100 * (bar.n / len(mosaicfiles[sample])), 1)
+            bar.set_description('Generating vignettes for run {} (%s%%)'.format(sample) % percent, refresh=True)
+            sample_id=file.parent.name
+            image,colored_image = ski.io.imread(file,as_gray=True),ski.io.imread(file,as_gray=False)
+            ##plt.imshow(image, cmap='gray')
 
-labelid_idx=df_properties.query('(area_convex!=area_bbox) & (extent!=1)').index[:-4]+1
-id_of_interest=4
-capture_id=np.pad(np.where(np.in1d(labelled,labelid_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[labelid_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
+            # Perform segmentation
 
-fig,axes=plt.subplots(1,1)
-plt.imshow(capture_id, cmap='gray')
-axes.set_axis_off()
-ski.filters.try_all_threshold(capture_id)
-binary= capture_id < ski.filters.threshold_isodata(capture_id)
-binary= capture_id < ski.filters.threshold_minimum(capture_id)
-binary= capture_id < ski.filters.threshold_otsu(capture_id)
-plt.imshow(binary, cmap='gray')
+            edges = ski.filters.sobel(image)
+            mask= sp.ndimage.binary_fill_holes(edges)==False
+            ##plt.figure(),plt.imshow(mask, cmap='gray')
 
+            # Identify regions of interest
+            labelled = measure.label(mask,background=1)
+            ##plt.figure(),plt.imshow(labelled)
 
-particle_id=pytesseract.image_to_string(binary,config= r'--psm 10')
-pytesseract.image_to_string(binary,config= r'digits')
-pytesseract.image_to_string(capture_id==0,config= r'--psm 10')
-plt.imshow(capture_id==0, cmap='gray')
+            # Measure region properties to look for rectangular blobs, a.k.a vignettes
+            df_properties=pd.DataFrame(ski.measure.regionprops_table(label_image=labelled,intensity_image=image,properties=['area_convex','area_bbox','axis_major_length','axis_minor_length','bbox','extent','slice']))
+            # Identify and plot rectangular regions (=vignettes), except for the last two corresponding to the period in the bottom sentence displayed on the mosaic ('Property shown : Capture ID')
 
-print(pytesseract.image_to_string(np.where(np.in1d(labelled,labelid_idx[0]).reshape(labelled.shape),image,0),config='--psm 13 outputbase digits'))
+            rect_idx=df_properties.query('(area_convex==area_bbox) & (extent==1)').index[:-2]+1
+            ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,rect_idx).reshape(labelled.shape),image,0), cmap='gray')
+            labelid_idx=((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')[:-4]).sort_values(['bbox-1','bbox-0']).index)+1 #label are sorted according to the x position
+            ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,labelid_idx).reshape(labelled.shape),image,0), cmap='gray')
+            for id_of_interest in np.arange(0,len(rect_idx)):
 
-#Split the mosaic according to the slices of rectangular regions
-pixel_size=df_pixel.Calibration_Factor.str.strip(' ').astype(float) #in microns per pixel
+                vignette_id=np.pad(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
+                ##plt.figure(),plt.imshow(vignette_id, cmap='gray')
+                ''' # Obsolete unless some particles got deleted in visualspreadsheet
+                capture_id=np.pad(np.where(np.in1d(labelled,labelid_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[labelid_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
+                
+                fig,axes=plt.subplots(1,1)
+                plt.imshow(capture_id, cmap='gray')
+                axes.set_axis_off()
+                ski.filters.try_all_threshold(capture_id)
+                binary= capture_id < ski.filters.threshold_isodata(capture_id)
+                binary= capture_id < ski.filters.threshold_minimum(capture_id)
+                binary= capture_id < ski.filters.threshold_otsu(capture_id)
+                plt.imshow(binary, cmap='gray')
+                
+                
+                pytesseract.image_to_string(binary,config= r'--psm 10')
+                pytesseract.image_to_string(binary,config= r'digits')
+                pytesseract.image_to_string(capture_id==0,config= r'--psm 10')
+                #particle_id=pytesseract.image_to_string(capture_id<(1-np.quantile(capture_id,0.97)),config= r'--psm 10')
+                plt.imshow(capture_id<(1-np.quantile(capture_id,0.97)), cmap='gray')
+                
+                print(pytesseract.image_to_string(np.where(np.in1d(labelled,labelid_idx[0]).reshape(labelled.shape),image,0),config='--psm 13 outputbase digits'))
+                '''
+                particle_id=particle_id+1
+                #Split the mosaic according to the slices of rectangular regions
+                pixel_size=float(df_pixel.at[file.parent.name,'Calibration_Factor'].strip(' ')) #in microns per pixel
+                scale_value = 50 # size of the scale bar in microns
+                padding= int((np.ceil(scale_value/pixel_size)+10)/2)
+                fig,axes=plt.subplots(1,1)
+                ##fig.tight_layout(pad=0, h_pad=0, w_pad=-1)
+                plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],((25,25),(padding,padding),(0,0)), 'constant',constant_values=float(df_metadata.at[file.parent.name,'Background_Intensity_Mean'])), cmap='gray')
+                axes.set_axis_off()
+                scalebar=AnchoredSizeBar(transform=axes.transData,size=scale_value/pixel_size,
+                                           label='{} $\mu$m'.format(scale_value), loc='lower center',
+                                           pad=0.1,
+                                           color='white',
+                                           frameon=False,
+                                           fontproperties=fontprops)
+                axes.add_artist(scalebar)
+                #axes.set_title('Particle ID: {}'.format(str(particle_id)))
+                save_direcotry=Path(str(file.parent).replace('acquisitions','ecotaxa')).expanduser()
+                save_direcotry.mkdir(parents=True,exist_ok=True)
+                fig.savefig(fname=str( save_direcotry/ 'vignette_{}.png'.format(str(particle_id).rstrip())), bbox_inches="tight")
+                plt.close('all')
+                bar.update(n=1)
 
-fig,axes=plt.subplots(1,1)
-plt.imshow(colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)], cmap='gray')
-axes.set_axis_off()
-scale_value=50
-scalebar=AnchoredSizeBar(transform=axes.transData,size=scale_value/pixel_size.loc[sample_id],
-                           label='{} $\mu$m'.format(scale_value), loc='lower left',
-                           pad=0.1,
-                           color='white',
-                           frameon=False,
-                           fontproperties=fontprops)
-ax[0].add_artist(scalebar)
-ax[0].set_title(particle_id)
-fig.savefig(fname=str(file.parent / '{}.png'.format(particle_id)))
 
 ## Processing raw images
+# Load raw and calibration images
+outputfiles_raw = list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' ).expanduser().rglob('Flowcam_10x_lexplore*/*.tif'))
+backgroundfiles,imagefiles=list(filter(lambda x: 'cal_' in x.name, outputfiles_raw)),list(filter(lambda x: 'rawfile_' in x.name, outputfiles_raw))
+
 # Load image file
 file=natsorted(imagefiles)[-1]#Path('R:Imaging_Flowcam/Flowcam data/Lexplore/acquisitions/Flowcam_10x_lexplore_wasam_20241002_2024-10-03 07-23-04/rawfile_011039.tif')#imagefiles[538]
 sample_id=file.parent.name
