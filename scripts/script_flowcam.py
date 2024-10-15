@@ -29,8 +29,16 @@ warnings.filterwarnings("ignore")
 from natsort import natsorted
 #Digits recognition
 import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
-pytesseract.pytesseract.tesseract_cmd = r'~\AppData\Local\Programs\Tesseract-OCR\tesseract'
+pytesseract.pytesseract.tesseract_cmd = r'{}\AppData\Local\Programs\Tesseract-OCR\tesseract'.format(str(Path.home()))
 from tqdm import tqdm
+
+# Read the metadata stored in yaml file
+import yaml #conda install PyYAML
+path_to_git=Path('~/GIT/Lexplore_ALGA').expanduser()
+path_to_config = path_to_git / 'data' / 'Lexplore_metadata.yaml'
+with open(path_to_config, 'r') as config_file:
+    cfg_metadata = yaml.safe_load(config_file)
+
 
 # Identification of the variables of interest in visualspreadsheet summary tables
 summary_metadata_columns=['Mode', 'Priming_Method', 'Flow_Rate', 'Recalibrations', 'Stop_Reason',
@@ -40,13 +48,13 @@ summary_metadata_columns=['Mode', 'Priming_Method', 'Flow_Rate', 'Recalibrations
        'Background_Intensity_Mean', 'Background_Intensity_Min',
        'Background_Intensity_Max', 'Start_Time', 'Sampling_Time',
        'Environment', 'Software', 'Magnification', 'Calibration_Factor',
-       'SerialNo', 'Number_of_Processors', 'Pump', 'Syringe_Size']
+       'SerialNo', 'Number_of_Processors', 'Pump', 'Syringe_Size','Skip']
 
 #Workflow starts here
 path_to_network=Path("R:") # Set working directory to forel-meco
 # Load metadata files (volume imaged, background pixel intensity, etc.) and save entries into separate tables (metadata and statistics)
 metadatafiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_10x_lexplore*/*_summary.csv'))
-df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name}))[summary_metadata_columns])[-1],metadatafiles),axis=0)
+df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name})),df:=df[[col for col in df.columns if col in summary_metadata_columns]])[-1],metadatafiles),axis=0)
 #Check the fluid volume imaged calculation based on the number of frames used. If
 df_metadata.Used.astype(float)/df_metadata.Fluid_Volume_Imaged.str.split(' ').str[0].astype(float)
 # This should be constant if the area of acceptable region, the size calibration, and the depth of the flow cell are kept constant
@@ -71,35 +79,55 @@ for sample in list(mosaicfiles.keys()):
     particle_id = 0
     with tqdm(desc='Generating vignettes for run {}'.format(sample), total=len(natsorted(mosaicfiles[sample])), bar_format='{desc}{bar}', position=0, leave=True) as bar:
         for file in natsorted([str(file) for file in mosaicfiles[sample]]):
+
             file=Path(file).expanduser()
             percent = np.round(100 * (bar.n / len(mosaicfiles[sample])), 1)
             bar.set_description('Generating vignettes for run {} (%s%%)'.format(sample) % percent, refresh=True)
             sample_id=file.parent.name
-            image,colored_image = ski.io.imread(file,as_gray=True),ski.io.imread(file,as_gray=False)
-            ##plt.imshow(image, cmap='gray')
+
+            # Crop the bottom pixels (-30 pixels) of the mosaic, otherwise tall particles may coincide with the bottom caption and be discarded
+            image,colored_image = ski.io.imread(file,as_gray=True)[slice(None, -30, None)],ski.io.imread(file,as_gray=False)[slice(None, -30, None)]
+            ##plt.imshow(image, cmap='gray'),plt.show()
 
             # Perform segmentation
 
             edges = ski.filters.sobel(image)
             mask= sp.ndimage.binary_fill_holes(edges)==False
-            ##plt.figure(),plt.imshow(mask, cmap='gray')
+            ##plt.figure(),plt.imshow(mask, cmap='gray'),plt.show()
 
             # Identify regions of interest
             labelled = measure.label(mask,background=1)
-            ##plt.figure(),plt.imshow(labelled)
+            ##plt.figure(),plt.imshow(labelled),plt.show()
 
             # Measure region properties to look for rectangular blobs, a.k.a vignettes
             df_properties=pd.DataFrame(ski.measure.regionprops_table(label_image=labelled,intensity_image=image,properties=['area_convex','area_bbox','axis_major_length','axis_minor_length','bbox','extent','slice']))
             # Identify and plot rectangular regions (=vignettes), except for the last two corresponding to the period in the bottom sentence displayed on the mosaic ('Property shown : Capture ID')
 
-            rect_idx=df_properties.query('(area_convex==area_bbox) & (extent==1)').index[:-2]+1
-            ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,rect_idx).reshape(labelled.shape),image,0), cmap='gray')
-            labelid_idx=((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')[:-4]).sort_values(['bbox-1','bbox-0']).index)+1 #label are sorted according to the x position
-            ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,labelid_idx).reshape(labelled.shape),image,0), cmap='gray')
+            rect_idx=df_properties.query('(area_convex==area_bbox) & (extent==1)').index+1#df_properties.query('(area_convex==area_bbox) & (extent==1)').index[:-2]+1
+            ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,rect_idx).reshape(labelled.shape),image,0), cmap='gray'),plt.show()
+            labelid_idx=((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')).sort_values(['bbox-1','bbox-0']).index)+1#((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')[:-4]).sort_values(['bbox-1','bbox-0']).index)+1 #label are sorted according to the x position
+            ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,labelid_idx).reshape(labelled.shape),image,0), cmap='gray'),plt.show()
+
+            # Check for particles to skip (e.g. bubbles).
+            # A line should be added manually in the summary export files to inform the particles ID (capture ID) that were manually filtered out
+            # e.g. Particle Count, 3300
+            #      Skip,[2235:2253]+[2255:2264]+[2266]
+            if len(df_metadata.loc[sample_id,'Skip']):
+                id_to_skip = sum(list(map(lambda id: list(np.arange(int(re.sub('\W+', '', id.split(':')[0])), int(re.sub('\W+', '', id.split(':')[1])) + 1)) if len( id.split(':')) == 2 else [int(re.sub('\W+', '', id))], df_metadata.loc[sample_id, 'Skip'].split(r']+['))), [])
+                if len(id_to_skip)!=(int(df_metadata.loc[sample_id,'Particle_Count'])-int(df_summary_statistics.loc[sample_id,'Count'])):
+                    print('\nAttention, Number of particles to skip is different than the difference between total particle count and particle count in the "Metadata statistics table".\nSkipping run {}. Please check the summary file and data file for missing particles'.format(sample_id))
+                    continue
+            else:
+                id_to_skip=[]
             for id_of_interest in np.arange(0,len(rect_idx)):
+                particle_id = particle_id + 1
+                while (particle_id in id_to_skip) : # If the particle was manually filtered out, skip the current id and proceed to the next one
+                    particle_id = particle_id + 1
+
+
 
                 vignette_id=np.pad(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
-                ##plt.figure(),plt.imshow(vignette_id, cmap='gray')
+                ##plt.figure(),plt.imshow(vignette_id, cmap='gray'),plt.show()
                 ''' # Obsolete unless some particles got deleted in visualspreadsheet
                 capture_id=np.pad(np.where(np.in1d(labelled,labelid_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[labelid_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
                 
@@ -121,7 +149,7 @@ for sample in list(mosaicfiles.keys()):
                 
                 print(pytesseract.image_to_string(np.where(np.in1d(labelled,labelid_idx[0]).reshape(labelled.shape),image,0),config='--psm 13 outputbase digits'))
                 '''
-                particle_id=particle_id+1
+
                 #Split the mosaic according to the slices of rectangular regions
                 pixel_size=float(df_pixel.at[file.parent.name,'Calibration_Factor'].strip(' ')) #in microns per pixel
                 scale_value = 50 # size of the scale bar in microns
@@ -140,9 +168,36 @@ for sample in list(mosaicfiles.keys()):
                 #axes.set_title('Particle ID: {}'.format(str(particle_id)))
                 save_direcotry=Path(str(file.parent).replace('acquisitions','ecotaxa')).expanduser()
                 save_direcotry.mkdir(parents=True,exist_ok=True)
-                fig.savefig(fname=str( save_direcotry/ 'vignette_{}.png'.format(str(particle_id).rstrip())), bbox_inches="tight")
+                fig.savefig(fname=str( save_direcotry/ 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(),str(particle_id).rstrip())), bbox_inches="tight")
                 plt.close('all')
             bar.update(n=1)
+
+## Generating Ecotaxa table
+with tqdm(desc='', total=len(list(mosaicfiles.keys())), bar_format='{desc}{bar}', position=0, leave=True) as bar:
+    for sample in list(mosaicfiles.keys()):
+        percent = np.round(100 * (bar.n / len(list(mosaicfiles.keys()))), 1)
+        bar.set_description('Generating Ecotaxa table for run {} (%s%%)'.format(sample) % percent, refresh=True)
+        path_to_data=mosaicfiles[sample][0].parent / str(sample +'.csv')
+        if path_to_data.exists():
+            df_data=pd.read_csv(path_to_data,encoding='latin-1')
+            df_ecotaxa=pd.DataFrame({'img_file_name':['[t]']+list('thumbnail_'+sample+'_'+df_data['Capture ID'].astype(str)+'.png'),
+                                     'img_rank':['[f]']+list(df_data['Group ID'].astype(float)),
+                                     'object_id':['[t]']+list('thumbnail_'+sample+'_'+df_data['Capture ID'].astype(str)+'.png'),
+                                     'object_lat':['[f]']+[cfg_metadata['latitude']]*len(df_data),
+                                     'object_lon':['[f]']+[cfg_metadata['longitude']]*len(df_data),
+                                     'object_date':['[t]']+[sample.split('_')[4]]*len(df_data),
+                                     'object_time':['[t]']+[cfg_metadata['wasam_sampling_time']]*len(df_data),
+                                     'object_depth_min':['[f]']+[0]*len(df_data),
+                                     'object_depth_max': ['[f]'] + [0] * len(df_data)
+                                     })
+            filename=str(path_to_data).replace('acquisitions','ecotaxa').replace('.csv','.tsv')
+            df_ecotaxa.to_csv(filename,sep='\t')
+        else:
+            print('\nDatafiles not found.Skipping run\n')
+        bar.update(n=1)
+
+
+
 
 
 ## Processing raw images
