@@ -1,0 +1,9 @@
+Beam width: 5 µm
+Core speed: 2.2m/s
+Variable length: 50 %
+Mu per pixel: 0.67 µm/pixel
+Crop margin base: 25
+Crop margin factor: 0.1
+Image threshold: 7
+Image Erosion/dilation steps: 1
+

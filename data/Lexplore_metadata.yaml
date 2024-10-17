@@ -1,6 +1,7 @@
 # This file contains the set of metadata that gets automatically appended to FlowCam and CytoSense datafiles for upload on EcoTaxa
-latitude : 46.5002275
-longitude : 6.6608352777777778
+latitude : 46.5002275 #decimal degrees
+longitude : 6.6608352777777778 #decimal degrees
 principal_investigator : 'Bastiaan Ibelings'
 instrument_operator : 'Irene Muscas / Mathilde Dugenne'
-wasam_sampling_time : '090000'
+wasam_sampling_time : '090000' #hhmmss
+pixel_size_cytosense : 0.67 #microns per pixel

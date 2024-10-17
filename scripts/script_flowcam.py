@@ -1,43 +1,11 @@
-# Objective: This script was written to test a set of image processing steps on Python
-import skimage as ski #pip install -U scikit-image
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-from numpy.core.defchararray import lower
-from skimage import color,measure,morphology
-from skimage.measure import regionprops
-from skimage.util import compare_images,crop
-import os
-import scipy as sp
-from pathlib import Path
-from PIL import Image
-import numpy as np
+## Objective: This script was written to test a set of image processing steps on Python
 
-import pandas as pd
-import matplotlib
-matplotlib.use('Qt5Agg')
-import matplotlib.pyplot as plt
-import latex
-matplotlib.rc('text', usetex = True)
-
-import matplotlib.font_manager as fm
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-fontprops = fm.FontProperties(size=14,family='serif')
-import copy
-my_cmap = copy.copy(plt.colormaps.get_cmap('gray_r')) # get a copy of the gray color map
-my_cmap.set_bad(alpha=0) # set how the colormap handles 'bad' values
 import warnings
 warnings.filterwarnings("ignore")
 from natsort import natsorted
 #Digits recognition
 import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
 pytesseract.pytesseract.tesseract_cmd = r'{}\AppData\Local\Programs\Tesseract-OCR\tesseract'.format(str(Path.home()))
-from tqdm import tqdm
-
-# Read the metadata stored in yaml file
-import yaml #conda install PyYAML
-path_to_git=Path('~/GIT/Lexplore_ALGA').expanduser()
-path_to_config = path_to_git / 'data' / 'Lexplore_metadata.yaml'
-with open(path_to_config, 'r') as config_file:
-    cfg_metadata = yaml.safe_load(config_file)
 
 
 # Identification of the variables of interest in visualspreadsheet summary tables

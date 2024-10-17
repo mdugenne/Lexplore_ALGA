@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<SetList configuration_date="2015-10-20T00:00:00.0000000" ExclusiveSets="True" SerialNumber="CS-2015-71">
+  <DefaultSet ListID="0" Name="Default (all)" Color="Gray" Visible="True" />
+  <AllImagesSet ListID="1" Name="All Imaged Particles" Color="Purple" Visible="True" />
+  <GateBasedSet ListID="2" Name="New Set" Color="Blue" Visible="True">
+    <GateCollection />
+  </GateBasedSet>
+  <GateBasedSet ListID="3" Name="IIF_large" Color="Purple" Visible="True">
+    <GateCollection />
+  </GateBasedSet>
+</SetList>
