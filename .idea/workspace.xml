@@ -5,8 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="b5741602-faf6-4abb-9522-1390ec236ac8" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/funcs_image_processing.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/funcs_image_processing.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/scripts/script_cytosense.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/script_cytosense.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />

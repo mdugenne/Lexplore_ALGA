@@ -27,6 +27,7 @@ imagefiles=dict(map(lambda file: ('_'.join(file.name.split('_')[:-1]),natsorted(
 #backgroundfiles,imagefiles=list(filter(lambda x: '_background.jpg' in x.name, outputfiles)),list(filter(lambda x: ('_background.jpg' not in x.name) & ('_Cropped_' not in x.name), outputfiles))
 #file=imagefiles[1774]
 df_properties=pd.DataFrame()
+df_volume=pd.DataFrame()
 for sample in list(imagefiles.keys()):
 
     with tqdm(desc='Generating vignettes for sample {}'.format(sample), total=len(natsorted(imagefiles[sample])), bar_format='{desc}{bar}', position=0, leave=True) as bar:
@@ -37,22 +38,35 @@ for sample in list(imagefiles.keys()):
         bar.set_description('Generating vignettes for sample {} (%s%%)'.format(sample) % percent, refresh=True)
         image = ski.io.imread(file,as_gray=True)
         #plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+        #Segmentation
         edges = ski.filters.sobel(image)
-    
+        markers = np.zeros_like(image)
+        markers[edges>np.quantile(edges,0.85)] = 1
+        markers[(sp.ndimage.binary_closing(edges) ==False)] = 0
+
+        plt.imshow(markers, cmap='gray')
+        fill_image = sp.ndimage.binary_fill_holes(markers)
+        label_objects, nb_labels = sp.ndimage.label(fill_image)
+
+        #Watershed segmentation
+        elevation_map = ski.filters.sobel(image)
+        #plt.imshow(elevation_map , cmap='gray')
+        '''
         #Canny edge detection
         edges=ski.feature.canny(image,sigma=0.003 )
         #plt.imshow(edges, cmap='gray')
         #plt.figure()
-    
+
+
+
         # Fill holes and labels the individuals
         fill_image = sp.ndimage.binary_fill_holes(edges)
         #plt.imshow(fill_image, cmap='gray')
         label_objects, nb_labels = sp.ndimage.label(fill_image)
         #plt.imshow(label_objects)
 
-        #Watershed segmentation
-        elevation_map = ski.filters.sobel(image)
-        #plt.imshow(elevation_map , cmap='gray')
+
 
         # Filtering smallest objects
         markers = np.zeros_like(image)
@@ -60,6 +74,7 @@ for sample in list(imagefiles.keys()):
         markers[image >=  np.quantile(image,0.99)] = 2
         label_objects, nb_labels = sp.ndimage.label(markers)
         #plt.imshow(label_objects)
+        '''
         largest_object_size=np.sort(np.bincount(label_objects.flat))[-2]
         large_markers = ski.morphology.remove_small_objects(label_objects, min_size=largest_object_size-1)
         #plt.figure()
@@ -99,7 +114,8 @@ for sample in list(imagefiles.keys()):
         thumbnail.savefig(fname=str( save_direcotry / 'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip())),bbox_inches="tight")
         plt.close()
     bar.update(n=1)
-
+    str(file.parent.parent)
+    df_volume=pd.concat([df_volume],axis=0)
 
 '''
 df_properties['Area']=df_properties['area']*(pixel_size**2)
@@ -111,11 +127,11 @@ df_properties = pd.merge(df_properties, df_bins, how='left', on=['size_class'])
 df_properties['volume']=4.3
 df_nbss = df_properties.astype({'sizeClasses':str}).groupby(list(df_bins.columns)).apply(lambda x: pd.Series({'NBSS':sum(x.Biovolume ) / x.volume.unique()[0] / (x.range_size_bin.unique())[0]})).reset_index().sort_values('size_class_mid').reset_index(drop=True)
 '''
-df_nbss,df_nbss_boot=nbss_estimates(df=df_properties.assign(Sample='_'.join(file.parent.name.split('_')[:-1])),pixel_size,grouping_factor=['Sample'])
+df_nbss,df_nbss_boot=nbss_estimates(df=df_properties.assign(Sample='_'.join(file.parent.name.split('_')[:-1])),pixel_size=pixel_size,grouping_factor=['Sample'])
 plot = (ggplot(df_nbss) +
         #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
-        geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std)',ymax='NBSS+NBSS_std'),fill='red',alpha=0.1)+
-        geom_point(mapping=aes(x='size_class_mid', y='NBSS'), alpha=1)+
+        geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std)',ymax='NBSS+NBSS_std',group='Group_index'),fill='red',alpha=0.1)+
+        geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index'), alpha=1)+
         labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',colour='') +
         scale_y_log10(breaks=10 ** np.arange(np.floor(np.log10(1e-01)) - 1, np.ceil(np.log10(1e+04)), step=1),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
         scale_x_log10() +
