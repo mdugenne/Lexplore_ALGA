@@ -5,10 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="b5741602-faf6-4abb-9522-1390ec236ac8" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/scripts/funcs_image_processing.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/data/Lexplore_metadata.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/data/Lexplore_metadata.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/script.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/script_cytosense.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scripts/script_flowcam.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/script_flowcam.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/funcs_image_processing.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/funcs_image_processing.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/script_cytosense.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/script_cytosense.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

@@ -10,7 +10,7 @@ from PIL import Image
 from skimage.util import compare_images,crop
 from skimage.color import rgb2gray
 from skimage.measure import regionprops
-
+import cv2
 
 # Path and File processing modules
 import os
