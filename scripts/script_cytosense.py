@@ -12,10 +12,10 @@ except:
 # Workflow starts here:
 
 pixel_size= cfg_metadata['pixel_size_cytosense'] #in microns per pixel
-path_to_network=Path("R:") # Set working directory to forel-meco
+path_to_network=Path("R:{}".format(os.path.sep)) # Set working directory to forel-meco
 outputfiles = list(Path(Path.home() / 'Documents'/'My CytoSense'/'Outputfiles').expanduser().rglob('*.jpg'))
 
-exportfiles=natsorted(list(Path(path_to_network /'lexplore' / 'Lexplore' / 'export files' / 'IIF' ).expanduser().rglob('lexplore_lakewater_surface_smart*.zip')))#
+exportfiles=natsorted(list(Path(path_to_network /'lexplore' / 'LeXPLORE' / 'export files' / 'IIF' ).expanduser().rglob('lexplore_lakewater_surface_smart*.zip')))#
 path_to_images=list()
 for file in exportfiles:
     path_to_images.append(Path(file.parent /file.name.replace(' ','_').replace('.zip','')).expanduser())
@@ -29,14 +29,19 @@ imagefiles=dict(map(lambda file: ('_'.join(file.name.split('_')[:-1]),natsorted(
 df_properties=pd.DataFrame()
 df_volume=pd.DataFrame()
 for sample in list(imagefiles.keys()):
-
+    # Append volume estimate and analysis duration
+    path_to_sample_info=imagefiles[sample][0].parent.parent / str(imagefiles[sample][0].parent.parent.name.replace('Export_','')+'_Info.txt')
+    if path_to_sample_info.expanduser().exists():
+        df_volume = pd.concat([df_volume,pd.read_table(path_to_sample_info,engine='python',encoding='utf-8',sep=r'\t',names=['Variable']).assign(Value=lambda x: x.Variable.str.split(':').str[1],Variable=lambda x: x.Variable.str.split(':').str[0]).set_index('Variable').T.rename(index={'Value':sample})], axis=0)
+    else:
+        df_volume = pd.concat([df_volume,pd.DataFrame(index=[sample])],axis=0)
     with tqdm(desc='Generating vignettes for sample {}'.format(sample), total=len(natsorted(imagefiles[sample])), bar_format='{desc}{bar}', position=0, leave=True) as bar:
     images=[str(file) for file in imagefiles[sample]]
     for file in natsorted(images):
         file=Path(file).expanduser()
         percent = np.round(100 * (bar.n / len(images)), 1)
         bar.set_description('Generating vignettes for sample {} (%s%%)'.format(sample) % percent, refresh=True)
-        image = ski.io.imread(file,as_gray=True)
+        image,background = ski.io.imread(file,as_gray=True),ski.io.imread(file.rsplit('_Cropped_')[0]+'_background.jpg',as_gray=True)
         #plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
 
         #Segmentation
@@ -45,8 +50,9 @@ for sample in list(imagefiles.keys()):
         markers[edges>np.quantile(edges,0.85)] = 1
         markers[(sp.ndimage.binary_closing(edges) ==False)] = 0
 
-        plt.imshow(markers, cmap='gray')
+        #plt.imshow(markers, cmap='gray'),plt.show()
         fill_image = sp.ndimage.binary_fill_holes(markers)
+        #plt.figure(),plt.imshow(fill_image),plt.show()
         label_objects, nb_labels = sp.ndimage.label(fill_image)
 
         #Watershed segmentation
@@ -78,7 +84,7 @@ for sample in list(imagefiles.keys()):
         largest_object_size=np.sort(np.bincount(label_objects.flat))[-2]
         large_markers = ski.morphology.remove_small_objects(label_objects, min_size=largest_object_size-1)
         #plt.figure()
-        #plt.imshow(large_markers)
+        #plt.imshow(large_markers),plt.show()
 
         markers[(markers == 1) & (large_markers == 0)] = 0
         #plt.imshow(markers, cmap=plt.cm.nipy_spectral)
@@ -114,8 +120,7 @@ for sample in list(imagefiles.keys()):
         thumbnail.savefig(fname=str( save_direcotry / 'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip())),bbox_inches="tight")
         plt.close()
     bar.update(n=1)
-    str(file.parent.parent)
-    df_volume=pd.concat([df_volume],axis=0)
+
 
 '''
 df_properties['Area']=df_properties['area']*(pixel_size**2)
