@@ -1,0 +1,28 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<SetList configuration_date="2015-10-20T00:00:00.0000000" ExclusiveSets="True" SerialNumber="CS-2015-71">
+  <DefaultSet ListID="0" Name="Default (all)" Color="Gray" Visible="True" />
+  <AllImagesSet ListID="1" Name="All Imaged Particles" Color="Chartreuse" Visible="True" />
+  <GateBasedSet ListID="2" Name="New Set" Color="Blue" Visible="True">
+    <GateCollection />
+  </GateBasedSet>
+  <GateBasedSet ListID="3" Name="IIF_large" Color="Purple" Visible="True">
+    <GateCollection />
+  </GateBasedSet>
+  <GateBasedSet ListID="4" Name="New Set 2" Color="Red" Visible="True">
+    <GateCollection>
+      <PolygonGate>
+        <XAxis Name="Total  SWS" IsLog="True" Type="SingleAxis" ChannelType="SWS" ChannelName="SWS" Parameter="Total" />
+        <YAxis Name="Total  FL Orange" IsLog="True" Type="SingleAxis" ChannelType="FLOrange" ChannelName="FL Orange" Parameter="Total" />
+        <Path>
+          <Point X="92.58789" Y="891.8551" />
+          <Point X="62.08569" Y="60.37958" />
+          <Point X="590.5464" Y="7.436239" />
+          <Point X="655375.1" Y="9.30687" />
+          <Point X="2021255" Y="8730.508" />
+          <Point X="455727.9" Y="149765.2" />
+          <Point X="19318.92" Y="61039.28" />
+        </Path>
+      </PolygonGate>
+    </GateCollection>
+  </GateBasedSet>
+</SetList>

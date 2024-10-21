@@ -1,0 +1,34 @@
+﻿Trigger level (mV): 8.55
+Smart Triggered!
+	SWS Maximum > 20
+CytoUSB Block size: 4k (maxTimeOut: 7.5s )
+
+Instrument: Geneve
+Beam width: 5
+Core speed: 2.2
+User Comments: 
+
+Measurement date: 17/09/2024 11:54:29
+Measurement duration: 712
+Flow rate (μL/sec): 7.05
+
+Channel 1: Trigger1
+Channel 2: FWS R
+Channel 3: FWS L
+Channel 4: SWS
+  - sensitivity level: 60
+Channel 5: FL Yellow
+  - sensitivity level: 78
+Channel 6: FL Orange
+  - sensitivity level: 82
+Channel 7: FL Red  - TRIGGER
+  - sensitivity level: 105
+Channel 8: DSP
+Channel 9: Trigger2
+Channel 10: FL Green
+  - sensitivity level: 87
+
+Total number of particles: 24015
+Smart triggered number of particles: 24015
+Concentration (part/μL): 68.4195389521064
+Volume (μL): 3019.59064858094
