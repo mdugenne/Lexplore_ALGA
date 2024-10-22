@@ -66,6 +66,9 @@ import seaborn as sns
 # Size spectrum processing
 from scipy.stats import poisson
 from scipy import stats
+import statsmodels
+from statsmodels import formula
+from statsmodels.formula import api
 bins=np.power(2, np.arange(0, np.log2(100000) + 1 / 3, 1 / 3))  # Fixed size(micrometers) bins used for UVP/EcoPart data. See https://ecopart.obs-vlfr.fr/. 1/3 ESD increments allow to bin particle of doubled biovolume in consecutive bins. np.exp(np.diff(np.log((1/6)*np.pi*(EcoPart_extended_bins**3))))
 
 df_bins = pd.DataFrame({'size_class': pd.cut(bins, bins).categories.values,  # Define bin categories (um)
@@ -117,6 +120,7 @@ def nbss_estimates(df,pixel_size,grouping_factor=['Sample'],niter=100):
     df_nbss_std=list(map(lambda iter:(x_pivot:=df_subset.pivot_table(values='Biovolume',columns=['size_class_mid','range_size_bin','size_class'],index=grouping_factor+['Group_index','volume'],aggfunc=lambda z:resample_biovolume(z,pixel=df_subset.Pixel.unique()[0],resample=True)),x_pivot:=x_pivot/x_pivot.columns.levels[1],   x_pivot:=(x_pivot.fillna(0)/pd.DataFrame(np.resize(np.repeat(x_pivot.index.get_level_values('volume'),x_pivot.shape[1]),(x_pivot.shape[0],x_pivot.shape[1])),index=x_pivot.index,columns=x_pivot.columns)).reset_index(col_level=2).droplevel(level=[0,1],axis=1).melt(id_vars=grouping_factor+['Group_index','volume'],value_vars=size_class,var_name='size_class',value_name='NBSS').replace({'NBSS':0}, np.nan).sort_values(grouping_factor+['Group_index','volume']).reset_index(drop=True))[-1],np.arange(niter)))
     df_nbss_boot=reduce(lambda left, right: pd.merge(left, right, on=grouping_factor+['Group_index','volume','size_class'],suffixes=(None,'_right')),df_nbss_std).reset_index(drop=True).sort_values(grouping_factor+['Group_index']).rename(columns={'NBSS_right':'NBSS'})
     df_summary=pd.concat([df_nbss_boot.reset_index().drop(columns='NBSS'),pd.DataFrame({'NBSS_std':df_nbss_boot[['NBSS']].std(axis=1)})],axis=1)
+    df_nbss_boot = pd.merge(df_nbss_boot, df_bins.astype({'size_class': str}), how='left', on=['size_class'])
     x_melt = pd.merge(x_melt,df_summary , how='left', on=grouping_factor+['Group_index','volume','size_class'])
 
     return x_melt,df_nbss_boot

@@ -5,3 +5,5 @@ principal_investigator : 'Bastiaan Ibelings'
 instrument_operator : 'Irene Muscas / Mathilde Dugenne'
 wasam_sampling_time : '090000' #hhmmss
 pixel_size_cytosense : 0.67 #microns per pixel
+width_cytosense : 1280 #width of the camera frame in pixels
+height_cytosense : 1024 #width of the camera frame in pixels
