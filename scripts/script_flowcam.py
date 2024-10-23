@@ -33,7 +33,7 @@ df_summary_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',
 df_pixel=df_metadata[['Magnification','Calibration_Factor']]
 
 # Load context file for cropping area
-contextfiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' ).rglob('*.ctx'))
+contextfiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions').rglob('*.ctx'))
 df_context=pd.concat(map(lambda file:pd.read_csv(file,sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains("\[",case=True)').set_index('Name').T.rename(index={'Value':file.parent.name}),contextfiles))
 df_cropping=df_context[['AcceptableTop','AcceptableBottom','AcceptableLeft','AcceptableRight']]
 

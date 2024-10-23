@@ -24,7 +24,7 @@ exportfiles=natsorted(list(Path(path_to_network /'lexplore' / 'LeXPLORE' / 'expo
 path_to_images=list()
 for file in exportfiles:
     path_to_images.append(Path(file.parent /file.name.replace(' ','_').replace('.zip','')).expanduser())
-    if not Path().expanduser().exists():
+    if not Path(file.parent / file.name.replace(' ','_').replace('.zip','')).expanduser().exists():
         shutil.unpack_archive(file, file.parent / file.name.replace(' ','_').replace('.zip','')) # Unzip export file
 
 
@@ -37,15 +37,15 @@ df_nbss=pd.DataFrame()
 for sample in list(imagefiles.keys()):
     # Append volume estimate and analysis duration
     path_to_sample_info=imagefiles[sample][0].parent.parent / str(imagefiles[sample][0].parent.parent.name.replace('Export_','')+'_Info.txt')
-    path_to_sample_set=path_to_sample_info.parent / str('set_statistics_'+ path_to_sample_info.name.replace('_Info.txt','.csv'))
+    path_to_sample_set=path_to_sample_info.parent / str('set_statistics.csv')
     if path_to_sample_info.expanduser().exists():
         if path_to_sample_set.expanduser().exists():
             df_sets=pd.read_table(path_to_sample_set,engine='python',encoding='utf-8',sep=r',')
-            df_volume_sample=pd.read_table(path_to_sample_info,engine='python',encoding='utf-8',sep=r'\t',names=['Variable']).assign(Value=lambda x: x.Variable.str.split(':').str[1],Variable=lambda x: x.Variable.str.split(':').str[0]).set_index('Variable').T.rename(index={'Value':sample}).rename(columns={'Volume (μL)':'Volume_analyzed','Measurement duration':'Measurement_duration'})
+            df_volume_sample=pd.read_table(path_to_sample_info,engine='python',encoding='utf-8',sep=r'\t',names=['Variable']).assign(Value=lambda x: x.Variable.astype(str).str.split('\:|\>').str[1:].str.join('').str.strip(),Variable=lambda x: x.Variable.str.split('\:|\>').str[0]).set_index('Variable').T.rename(index={'Value':sample}).rename(columns={'Volume (μL)':'Volume_analyzed','Measurement duration':'Measurement_duration'})
             cytosense_processing_time_correction=df_sets.query('Set=="All Imaged Particles"').Count.values[0]/df_sets.query('Set=="IIF_large"').Count.values[0]
         else:
             cytosense_processing_time_correction =len(imagefiles[sample]) / float(df_volume_sample['Total number of particles'].values[0].lstrip())
-        df_volume_sample=df_volume_sample.assign(Volume_analyzed=lambda x: x.Volume_analyzed.astype(float)*1e-03,Volume_pumped=lambda x: x['Flow rate (μL/sec)'].astype(float)*x.Measurement_duration.astype(float)*1e-03,Volume_Fluid_imaged=lambda x: np.pi*(reg_calibration.predict(pd.DataFrame({'Flow_rate':x['Flow rate (μL/sec)'].astype(float)}))*1e-03/2)*frame_width*pixel_size*1e-03*x.Measurement_duration.astype(float)*1e-03*(1+cytosense_processing_time_correction))
+        df_volume_sample=df_volume_sample.assign(Volume_analyzed=lambda x: x.Volume_analyzed.astype(float)*1e-03,Volume_pumped=lambda x: x['Flow rate (μL/sec)'].astype(float)*x.Measurement_duration.astype(float)*1e-03,Volume_Fluid_imaged=lambda x: np.pi*(reg_calibration.predict(pd.DataFrame({'Flow_rate':x['Flow rate (μL/sec)'].astype(float)}))*1e-03/2)*frame_width*pixel_size*1e-03*cfg_metadata['fps_cytosense']*x.Measurement_duration.astype(float)*1e-03*(1-cytosense_processing_time_correction))
         df_volume = pd.concat([df_volume,df_volume_sample], axis=0)
     else:
         df_volume = pd.concat([df_volume,pd.DataFrame(index=[sample])],axis=0)
@@ -116,10 +116,10 @@ for sample in list(imagefiles.keys()):
         largest_object =np.isin(labelled, np.arange(0,len((np.bincount(labelled.flat)[1:])))+1) #labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
         #plt.figure(),plt.imshow(largest_object),plt.show()
 
-        # Measure properties
+        # Measure properties, save to EcoTaxa format, and append to existing samples
         particle_id=file.name.split('_')[-1].split('.')[0]
-        df_properties_sample=pd.concat([pd.DataFrame({'Sample':sample,'nb_particles':nb_labels},index=[particle_id]),pd.DataFrame(ski.measure.regionprops_table(label_image=largest_object.astype(int),intensity_image=image,properties=['area','area_bbox','area_convex','area_filled','axis_major_length','axis_minor_length','axis_major_length','bbox','centroid_local','centroid_weighted_local','eccentricity','equivalent_diameter_area','extent','image_intensity','inertia_tensor','inertia_tensor_eigvals','intensity_mean','intensity_max','intensity_min','intensity_std','moments','moments_central','moments_hu','num_pixels','orientation','perimeter','slice']),index=[particle_id])],axis=1) if nb_labels>0 else pd.DataFrame({'Sample':sample,'nb_particles':nb_labels},index=[particle_id])
-        df_properties=pd.concat([df_properties, df_properties_sample],axis=0)
+        df_properties_sample=pd.concat([pd.DataFrame({'img_file_name':'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id]),pd.DataFrame(ski.measure.regionprops_table(label_image=largest_object.astype(int),intensity_image=image,properties=['area','area_bbox','area_convex','area_filled','axis_major_length','axis_minor_length','axis_major_length','bbox','centroid_local','centroid_weighted_local','eccentricity','equivalent_diameter_area','extent','image_intensity','inertia_tensor','inertia_tensor_eigvals','intensity_mean','intensity_max','intensity_min','intensity_std','moments','moments_central','moments_hu','num_pixels','orientation','perimeter','slice']),index=[particle_id])],axis=1) if nb_labels>0 else pd.DataFrame({'img_file_name':'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id])
+        df_properties=pd.concat([df_properties, df_properties_sample],axis=0).reset_index(drop=True)
 
         # Generate and save thumbnails for EcoTaxa
         contour = ski.morphology.dilation(largest_object.astype(int), footprint=ski.morphology.square(3), out=None, shift_x=False, shift_y=False)
@@ -138,14 +138,17 @@ for sample in list(imagefiles.keys()):
                                    pad=0.1, color='black',frameon=False, fontproperties=fontprops)
         ax.add_artist(scalebar)
         #thumbnail.show()
-        save_direcotry = Path(str(file.parent.parent).replace('export files{}IIF'.format(os.sep), 'ecotaxa').replace('Export_','').replace(' ','_')).expanduser()
-        save_direcotry.mkdir(parents=True, exist_ok=True)
-        thumbnail.savefig(fname=str( save_direcotry / 'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip())),bbox_inches="tight")
+        save_directory = Path(str(file.parent.parent).replace('export files{}IIF'.format(os.sep), 'ecotaxa').replace('Export_','').replace(' ','_')).expanduser()
+        save_directory.mkdir(parents=True, exist_ok=True)
+        thumbnail.savefig(fname=str( save_directory / 'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip())),bbox_inches="tight")
         plt.close()
         bar.update(n=1)
-
-    df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.assign(volume=lambda x: x.Volume_Fluid_imaged.astype(float))[['volume','Measurement_duration']],how='left',right_index=True,left_on=['Sample']), pixel_size=pixel_size, grouping_factor=['Sample'])
-    df_nbss=pd.concat([df_nbss,df_nbss_sample],axis=0)
+    # Generate abd save table for EcoTaxa
+    filename_ecotaxa = str(save_directory /'ecotaxa_table_{}.tsv'.format(str(sample).rstrip()))
+    df_ecotaxa = generate_ecotaxa_table(df=pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.loc[sample].to_frame().T.assign(sample_trigger=lambda x: pd.Series(x.values[0])[pd.Series(x.values[0]).astype(str).str.contains('TRIGGER')].values[0].split('-')[0].strip().replace(' ','')).rename(columns={'Volume_analyzed':'sample_volume_analyzed_ml','Volume_pumped':'sample_volume_pumped_ml','Volume_Fluid_imaged':'sample_volume_fluid_imaged_ml','Trigger level (mV)':'sample_trigger_threshold_mv','Measurement_duration':'sample_duration_sec'})[['sample_trigger','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_trigger_threshold_mv','sample_duration_sec']],how='left',right_index=True,left_on=['Sample']), instrument='CytoSense', path_to_storage=filename_ecotaxa)
+    # Generate Normalized Biovolume Size Spectra
+    df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Volume_Fluid_imaged.astype(float))[['volume','Measurement_duration']],how='left',right_index=True,left_on=['Sample']), pixel_size=pixel_size, grouping_factor=['Sample'])
+    df_nbss=pd.concat([df_nbss,df_nbss_sample],axis=0).reset_index(drop=True)
 
 
 
@@ -160,14 +163,16 @@ df_properties['volume']=4.3
 df_nbss = df_properties.astype({'sizeClasses':str}).groupby(list(df_bins.columns)).apply(lambda x: pd.Series({'NBSS':sum(x.Biovolume ) / x.volume.unique()[0] / (x.range_size_bin.unique())[0]})).reset_index().sort_values('size_class_mid').reset_index(drop=True)
 df_nbss,df_nbss_boot=nbss_estimates(df=df_properties.assign(Sample='_'.join(file.parent.name.split('_')[:-1])),pixel_size=pixel_size,grouping_factor=['Sample'])
 '''
+#Attention, grouping factor should be a string
 plot = (ggplot(df_nbss) +
         #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
-        #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon')+
-        geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std)',ymax='NBSS+NBSS_std',group='Sample',color='Sample'),alpha=0.1)+
+        #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
+        geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
         geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='Sample'), alpha=1)+
         labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',colour='') +
         scale_y_log10(breaks=10 ** np.arange(np.floor(np.log10(1e-01)) - 1, np.ceil(np.log10(1e+04)), step=1),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
-        scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: ['1x10$^%s$' % round(np.floor(np.log10(v))) if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '%s' % round( v / (10 ** np.floor(np.log10(v)))) for v in l]) +guides(colour=None)+
+        scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        guides(colour=None,fill=None)+
         theme_paper).draw(show=False)
 
 plot.savefig(fname='{}/figures/Initial_test/cytosense_test_nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')

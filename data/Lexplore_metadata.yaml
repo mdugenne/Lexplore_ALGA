@@ -1,9 +1,18 @@
 # This file contains the set of metadata that gets automatically appended to FlowCam and CytoSense datafiles for upload on EcoTaxa
-latitude : 46.5002275 #decimal degrees
-longitude : 6.6608352777777778 #decimal degrees
+program : 'LeXPLORE' #Name of the research program
+project : 'ALGA' #Name of the research project
+latitude : 46.5002275 #Sampling latitude, decimal degrees
+longitude : 6.6608352777777778 #Sampling longitude, decimal degrees
 principal_investigator : 'Bastiaan Ibelings'
 instrument_operator : 'Irene Muscas / Mathilde Dugenne'
 wasam_sampling_time : '090000' #hhmmss
-pixel_size_cytosense : 0.67 #microns per pixel
-width_cytosense : 1280 #width of the camera frame in pixels
-height_cytosense : 1024 #width of the camera frame in pixels
+local_path_storage : 'R' #Name of the local network/directory where data/exportfiles are stored
+flowcam_10x_context_file : 'R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_10x_lexplore.ctx' # Local path to context file for the FlowCam 10x acquisitions
+flowcam_macro_context_file : 'R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_5mm_lexplore.ctx' # Local path to context file for the FlowCam macro acquisitions
+pixel_size_cytosense : 0.67 #Cytosense camera resolution in micrometer per pixel
+pixel_size_flowcam_10x : 0.7339 #FlowCam objective 10x resolution in micrometer per pixel
+pixel_size_flowcam_macro : 9.47 #FlowCam macro resolution in micrometer per pixel
+width_cytosense : 1280 #width of the Cytosense camera frame in pixels
+height_cytosense : 1024 #width of the Cytosense camera frame in pixels
+fps_cytosense : 26.89 #Frequency of Cytosense image acquisition in frames per second
+version_cytoUSB : 'v6.3.3.0'
