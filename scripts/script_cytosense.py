@@ -45,107 +45,109 @@ for sample in list(imagefiles.keys()):
             cytosense_processing_time_correction=df_sets.query('Set=="All Imaged Particles"').Count.values[0]/df_sets.query('Set=="IIF_large"').Count.values[0]
         else:
             cytosense_processing_time_correction =len(imagefiles[sample]) / float(df_volume_sample['Total number of particles'].values[0].lstrip())
-        df_volume_sample=df_volume_sample.assign(Volume_analyzed=lambda x: x.Volume_analyzed.astype(float)*1e-03,Volume_pumped=lambda x: x['Flow rate (μL/sec)'].astype(float)*x.Measurement_duration.astype(float)*1e-03,Volume_Fluid_imaged=lambda x: np.pi*(reg_calibration.predict(pd.DataFrame({'Flow_rate':x['Flow rate (μL/sec)'].astype(float)}))*1e-03/2)*frame_width*pixel_size*1e-03*cfg_metadata['fps_cytosense']*x.Measurement_duration.astype(float)*1e-03*(1-cytosense_processing_time_correction))
+        df_volume_sample=df_volume_sample.assign(Volume_analyzed=lambda x: x.Volume_analyzed.astype(float)*1e-03,Volume_pumped=lambda x: x['Flow rate (μL/sec)'].astype(float)*x.Measurement_duration.astype(float)*1e-03,Volume_Fluid_imaged=lambda x: np.pi*(reg_calibration.predict(pd.DataFrame({'Flow_rate':x['Flow rate (μL/sec)'].astype(float)}))*1e-03/2)*frame_width*pixel_size*1e-03*cfg_metadata['fps_cytosense']*x.Measurement_duration.astype(float)*1e-03).assign(Volume_Fluid_imaged=lambda x:x.Volume_Fluid_imaged*cytosense_processing_time_correction*(x.Volume_analyzed/x.Volume_Fluid_imaged)).rename(columns={'Flow rate (μL/sec)':'Flow_rate'})
         df_volume = pd.concat([df_volume,df_volume_sample], axis=0)
     else:
         df_volume = pd.concat([df_volume,pd.DataFrame(index=[sample])],axis=0)
+    # Loop through thumbnails
+    images = [str(file) for file in imagefiles[sample]]
     with tqdm(desc='Generating vignettes for sample {}'.format(sample), total=len(natsorted(imagefiles[sample])), bar_format='{desc}{bar}', position=0, leave=True) as bar:
-    images=[str(file) for file in imagefiles[sample]]
-    for file in natsorted(images):
-        file=Path(file).expanduser()
-        percent = np.round(100 * (bar.n / len(images)), 1)
-        bar.set_description('Generating vignettes for sample {} (%s%%)'.format(sample) % percent, refresh=True)
-        image = ski.io.imread(file,as_gray=True)#,ski.io.imread(str(file).rsplit('_Cropped_')[0]+'_background.jpg',as_gray=True)
-        #plt.figure(),plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)),plt.show()
 
-        #Segmentation
-        edges = ski.filters.sobel(image)
-        markers = np.zeros_like(image)
-        markers[edges>np.quantile(edges,0.85)] = 1
-        markers[(sp.ndimage.binary_closing(edges) ==False)] = 0
+        for file in natsorted(images):
+            file=Path(file).expanduser()
+            percent = np.round(100 * (bar.n / len(images)), 1)
+            bar.set_description('Generating vignettes for sample {} (%s%%)'.format(sample) % percent, refresh=True)
+            image = ski.io.imread(file,as_gray=True)#,ski.io.imread(str(file).rsplit('_Cropped_')[0]+'_background.jpg',as_gray=True)
+            #plt.figure(),plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)),plt.show()
 
-        #plt.imshow(markers, cmap='gray'),plt.show()
-        fill_image = sp.ndimage.binary_fill_holes(markers)
-        #plt.figure(),plt.imshow(fill_image),plt.show()
-        label_objects, nb_labels = sp.ndimage.label(fill_image)
-        # plt.figure(),plt.imshow(label_objects),plt.show()
+            #Segmentation
+            edges = ski.filters.sobel(image)
+            markers = np.zeros_like(image)
+            markers[edges>np.quantile(edges,0.85)] = 1
+            markers[(sp.ndimage.binary_closing(edges) ==False)] = 0
 
-        #Watershed segmentation
-        elevation_map = ski.filters.sobel(image)
-        #plt.imshow(elevation_map , cmap='gray')
-        '''
-        #Canny edge detection
-        edges=ski.feature.canny(image,sigma=0.003 )
-        #plt.imshow(edges, cmap='gray')
-        #plt.figure()
+            #plt.imshow(markers, cmap='gray'),plt.show()
+            fill_image = sp.ndimage.binary_fill_holes(markers)
+            #plt.figure(),plt.imshow(fill_image),plt.show()
+            label_objects, nb_labels = sp.ndimage.label(fill_image)
+            # plt.figure(),plt.imshow(label_objects),plt.show()
 
+            #Watershed segmentation
+            elevation_map = ski.filters.sobel(image)
+            #plt.imshow(elevation_map , cmap='gray')
+            '''
+            #Canny edge detection
+            edges=ski.feature.canny(image,sigma=0.003 )
+            #plt.imshow(edges, cmap='gray')
+            #plt.figure()
+    
+    
+    
+            # Fill holes and labels the individuals
+            fill_image = sp.ndimage.binary_fill_holes(edges)
+            #plt.imshow(fill_image, cmap='gray')
+            label_objects, nb_labels = sp.ndimage.label(fill_image)
+            #plt.imshow(label_objects)
+    
+    
+    
+            # Filtering smallest objects
+            markers = np.zeros_like(image)
+            markers[image <  np.quantile(image,0.05)] = 1
+            markers[image >=  np.quantile(image,0.99)] = 2
+            label_objects, nb_labels = sp.ndimage.label(markers)
+            #plt.imshow(label_objects)
+            '''
+            # Fix the lowest object size to 5 um
+            largest_object_size=np.pi*(10*pixel_size/2)**2#np.quantile(np.sort(np.bincount(label_objects.flat))[::-2],q=0.9975)
+            #largest_object_size=np.sort(np.bincount(label_objects.flat))[-2]
+            large_markers = ski.morphology.remove_small_objects(label_objects, min_size=largest_object_size-1)
+            #plt.figure(),plt.imshow(large_markers),plt.show()
 
+            markers[(markers == 1) & (large_markers == 0)] = 0
+            #plt.figure(),plt.imshow(markers, cmap=plt.cm.nipy_spectral),plt.show()
+            fill_image = sp.ndimage.binary_fill_holes(markers)
+            # plt.figure(),plt.imshow(fill_image),plt.show()
+            label_markers, nb_labels = sp.ndimage.label(fill_image)
+            # plt.figure(),plt.imshow(label_markers, cmap=plt.cm.gray),plt.show()
 
-        # Fill holes and labels the individuals
-        fill_image = sp.ndimage.binary_fill_holes(edges)
-        #plt.imshow(fill_image, cmap='gray')
-        label_objects, nb_labels = sp.ndimage.label(fill_image)
-        #plt.imshow(label_objects)
+            segmented_image = ski.segmentation.watershed(elevation_map, markers)
+            #plt.imshow(segmented_image, cmap=plt.cm.gray),plt.show()
 
+            labelled = measure.label(large_markers)
+            largest_object =np.isin(labelled, np.arange(0,len((np.bincount(labelled.flat)[1:])))+1) #labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
+            #plt.figure(),plt.imshow(largest_object),plt.show()
 
+            # Measure properties, save to EcoTaxa format, and append to existing samples
+            particle_id=file.name.split('_')[-1].split('.')[0]
+            df_properties_sample=pd.concat([pd.DataFrame({'img_file_name':'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id]),pd.DataFrame(ski.measure.regionprops_table(label_image=largest_object.astype(int),intensity_image=image,properties=['area','area_bbox','area_convex','area_filled','axis_major_length','axis_minor_length','axis_major_length','bbox','centroid_local','centroid_weighted_local','eccentricity','equivalent_diameter_area','extent','image_intensity','inertia_tensor','inertia_tensor_eigvals','intensity_mean','intensity_max','intensity_min','intensity_std','moments','moments_central','moments_hu','num_pixels','orientation','perimeter','slice']),index=[particle_id])],axis=1) if nb_labels>0 else pd.DataFrame({'img_file_name':'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id])
+            df_properties=pd.concat([df_properties, df_properties_sample],axis=0).reset_index(drop=True)
 
-        # Filtering smallest objects
-        markers = np.zeros_like(image)
-        markers[image <  np.quantile(image,0.05)] = 1
-        markers[image >=  np.quantile(image,0.99)] = 2
-        label_objects, nb_labels = sp.ndimage.label(markers)
-        #plt.imshow(label_objects)
-        '''
-        # Fix the lowest object size to 5 um
-        largest_object_size=np.pi*(10*pixel_size/2)**2#np.quantile(np.sort(np.bincount(label_objects.flat))[::-2],q=0.9975)
-        #largest_object_size=np.sort(np.bincount(label_objects.flat))[-2]
-        large_markers = ski.morphology.remove_small_objects(label_objects, min_size=largest_object_size-1)
-        #plt.figure(),plt.imshow(large_markers),plt.show()
+            # Generate and save thumbnails for EcoTaxa
+            contour = ski.morphology.dilation(largest_object.astype(int), footprint=ski.morphology.square(3), out=None, shift_x=False, shift_y=False)
+            contour -= largest_object.astype(int)
 
-        markers[(markers == 1) & (large_markers == 0)] = 0
-        #plt.figure(),plt.imshow(markers, cmap=plt.cm.nipy_spectral),plt.show()
-        fill_image = sp.ndimage.binary_fill_holes(markers)
-        # plt.figure(),plt.imshow(fill_image),plt.show()
-        label_markers, nb_labels = sp.ndimage.label(fill_image)
-        # plt.figure(),plt.imshow(label_markers, cmap=plt.cm.gray),plt.show()
+            thumbnail, ax = plt.subplots(1, 1)
+            scale_value=50
+            ax.set_axis_off()
+            padding=int(np.ceil(scale_value / pixel_size))
+            ax.imshow(np.pad((contour), int(np.ceil(scale_value / pixel_size)), constant_values=0), cmap='gray_r')
+            ax.imshow(cv2.cvtColor(ski.exposure.adjust_gamma(np.pad(image,padding , 'constant', constant_values=np.quantile(image,0.5)),0.7,gain=1), cv2.COLOR_BGR2RGB), alpha=.8)
+            ax.imshow(cv2.cvtColor( ski.exposure.adjust_gamma(np.pad(image, padding, 'constant', constant_values=np.quantile(image, 0.5)), 0.7, gain=1), cv2.COLOR_BGR2RGB), alpha=.8)
 
-        segmented_image = ski.segmentation.watershed(elevation_map, markers)
-        #plt.imshow(segmented_image, cmap=plt.cm.gray),plt.show()
-
-        labelled = measure.label(large_markers)
-        largest_object =np.isin(labelled, np.arange(0,len((np.bincount(labelled.flat)[1:])))+1) #labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
-        #plt.figure(),plt.imshow(largest_object),plt.show()
-
-        # Measure properties, save to EcoTaxa format, and append to existing samples
-        particle_id=file.name.split('_')[-1].split('.')[0]
-        df_properties_sample=pd.concat([pd.DataFrame({'img_file_name':'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id]),pd.DataFrame(ski.measure.regionprops_table(label_image=largest_object.astype(int),intensity_image=image,properties=['area','area_bbox','area_convex','area_filled','axis_major_length','axis_minor_length','axis_major_length','bbox','centroid_local','centroid_weighted_local','eccentricity','equivalent_diameter_area','extent','image_intensity','inertia_tensor','inertia_tensor_eigvals','intensity_mean','intensity_max','intensity_min','intensity_std','moments','moments_central','moments_hu','num_pixels','orientation','perimeter','slice']),index=[particle_id])],axis=1) if nb_labels>0 else pd.DataFrame({'img_file_name':'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id])
-        df_properties=pd.concat([df_properties, df_properties_sample],axis=0).reset_index(drop=True)
-
-        # Generate and save thumbnails for EcoTaxa
-        contour = ski.morphology.dilation(largest_object.astype(int), footprint=ski.morphology.square(3), out=None, shift_x=False, shift_y=False)
-        contour -= largest_object.astype(int)
-
-        thumbnail, ax = plt.subplots(1, 1)
-        scale_value=50
-        ax.set_axis_off()
-        padding=int(np.ceil(scale_value / pixel_size))
-        ax.imshow(np.pad((contour), int(np.ceil(scale_value / pixel_size)), constant_values=0), cmap='gray_r')
-        ax.imshow(cv2.cvtColor(ski.exposure.adjust_gamma(np.pad(image,padding , 'constant', constant_values=np.quantile(image,0.5)),0.7,gain=1), cv2.COLOR_BGR2RGB), alpha=.8)
-        ax.imshow(cv2.cvtColor( ski.exposure.adjust_gamma(np.pad(image, padding, 'constant', constant_values=np.quantile(image, 0.5)), 0.7, gain=1), cv2.COLOR_BGR2RGB), alpha=.8)
-
-        scalebar = AnchoredSizeBar(transform=ax.transData, size=scale_value / pixel_size,
-                                   label='{} $\mu$m'.format(scale_value), loc='lower center',
-                                   pad=0.1, color='black',frameon=False, fontproperties=fontprops)
-        ax.add_artist(scalebar)
-        #thumbnail.show()
-        save_directory = Path(str(file.parent.parent).replace('export files{}IIF'.format(os.sep), 'ecotaxa').replace('Export_','').replace(' ','_')).expanduser()
-        save_directory.mkdir(parents=True, exist_ok=True)
-        thumbnail.savefig(fname=str( save_directory / 'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip())),bbox_inches="tight")
-        plt.close()
-        bar.update(n=1)
-    # Generate abd save table for EcoTaxa
+            scalebar = AnchoredSizeBar(transform=ax.transData, size=scale_value / pixel_size,
+                                       label='{} $\mu$m'.format(scale_value), loc='lower center',
+                                       pad=0.1, color='black',frameon=False, fontproperties=fontprops)
+            ax.add_artist(scalebar)
+            #thumbnail.show()
+            save_directory = Path(str(file.parent.parent).replace('export files{}IIF'.format(os.sep), 'ecotaxa').replace('Export_','').replace(' ','_')).expanduser()
+            save_directory.mkdir(parents=True, exist_ok=True)
+            thumbnail.savefig(fname=str( save_directory / 'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip())),bbox_inches="tight")
+            plt.close()
+            bar.update(n=1)
+        # Generate abd save table for EcoTaxa
     filename_ecotaxa = str(save_directory /'ecotaxa_table_{}.tsv'.format(str(sample).rstrip()))
-    df_ecotaxa = generate_ecotaxa_table(df=pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.loc[sample].to_frame().T.assign(sample_trigger=lambda x: pd.Series(x.values[0])[pd.Series(x.values[0]).astype(str).str.contains('TRIGGER')].values[0].split('-')[0].strip().replace(' ','')).rename(columns={'Volume_analyzed':'sample_volume_analyzed_ml','Volume_pumped':'sample_volume_pumped_ml','Volume_Fluid_imaged':'sample_volume_fluid_imaged_ml','Trigger level (mV)':'sample_trigger_threshold_mv','Measurement_duration':'sample_duration_sec'})[['sample_trigger','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_trigger_threshold_mv','sample_duration_sec']],how='left',right_index=True,left_on=['Sample']), instrument='CytoSense', path_to_storage=filename_ecotaxa)
+    df_ecotaxa = generate_ecotaxa_table(df=pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.loc[sample].to_frame().T.assign(sample_trigger=lambda x: pd.Series(x.values[0])[pd.Series(x.values[0]).astype(str).str.contains('TRIGGER')].values[0].split('-')[0].strip().replace(' ','')).rename(columns={'Volume_analyzed':'sample_volume_analyzed_ml','Volume_pumped':'sample_volume_pumped_ml','Volume_Fluid_imaged':'sample_volume_fluid_imaged_ml','Trigger level (mV)':'sample_trigger_threshold_mv','Measurement_duration':'sample_duration_sec','Flow_rate':'sample_flow_rate'})[['sample_trigger','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_trigger_threshold_mv','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='CytoSense', path_to_storage=filename_ecotaxa)
     # Generate Normalized Biovolume Size Spectra
     df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Volume_Fluid_imaged.astype(float))[['volume','Measurement_duration']],how='left',right_index=True,left_on=['Sample']), pixel_size=pixel_size, grouping_factor=['Sample'])
     df_nbss=pd.concat([df_nbss,df_nbss_sample],axis=0).reset_index(drop=True)

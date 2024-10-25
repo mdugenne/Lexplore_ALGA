@@ -157,13 +157,26 @@ dict_properties_types={'nb_particles':['[f]'], 'area':['[f]'], 'area_bbox':['[f]
        'moments_hu-0':['[f]'], 'moments_hu-1':['[f]'], 'moments_hu-2':['[f]'], 'moments_hu-3':['[f]'],
        'moments_hu-4':['[f]'], 'moments_hu-5':['[f]'], 'moments_hu-6':['[f]'], 'num_pixels':['[f]'],
        'orientation':['[f]'], 'perimeter':['[f]'], 'slice':['[t]']}
+dict_properties_visual_spreadsheet={'Name':['[t]'], 'Area (ABD)':['[f]'], 'Area (Filled)':['[f]'], 'Aspect Ratio':['[f]'], 'Average Blue':['[f]'],
+       'Average Green':['[f]'], 'Average Red':['[f]'], 'Calibration Factor':['[f]'],
+       'Calibration Image':['[f]'], 'Capture ID':['[t]'] ,'Capture X':['[f]'], 'Capture Y':['[f]'], 'Circularity':['[f]'],
+       'Circularity (Hu)':['[f]'], 'Compactness':['[f]'], 'Convex Perimeter':['[f]'], 'Convexity':['[f]'],
+       'Date':['[t]'], 'Diameter (ABD)':['[f]'], 'Diameter (ESD)':['[f]'], 'Diameter (FD)':['[f]'],
+       'Edge Gradient':['[f]'], 'Elapsed Time':['[f]'], 'Elongation':['[f]'], 'Feret Angle Max':['[f]'],
+       'Feret Angle Min':['[f]'], 'Fiber Curl':['[f]'], 'Fiber Straightness':['[f]'], 'Filter Score':['[f]'],
+       'Geodesic Aspect Ratio':['[f]'], 'Geodesic Length':['[f]'], 'Geodesic Thickness':['[f]'],
+       'Group ID':['[t]'], 'Image Height':['[f]'], 'Image Width':['[f]'], 'Image X':['[f]'], 'Image Y':['[f]'],
+       'Length':['[f]'], 'Particles Per Chain':['[f]'], 'Perimeter':['[f]'], 'Ratio Blue/Green':['[f]'],
+       'Ratio Red/Blue':['[f]'], 'Ratio Red/Green':['[f]'], 'Roughness':['[f]'], 'Source Image':['[f]'],
+       'Sum Intensity':['[f]'], 'Symmetry':['[f]'], 'Time':['[t]'], 'Transparency':['[f]'], 'Volume (ABD)':['[f]'],
+       'Width':['[f]']}
 #Define a metadata table for Lexplore based on the metadata confiugration file
 df_sample_lexplore_cytosense=pd.DataFrame({'sample_longitude':['[f]',cfg_metadata['longitude']],'sample_latitude':['[f]',cfg_metadata['latitude']],'sample_platform':['[t]',cfg_metadata['program']],'sample_project':['[t]',cfg_metadata['project']],'sample_principal_investigator':['[t]',cfg_metadata['principal_investigator']],'sample_depthprofile':['[t]','True'] })
 df_acquisition_lexplore_cytosense=pd.DataFrame({'acq_instrument':['[t]','CytoSense_CS-2015-71'],'acq_pumptype':['[t]','peristaltic'],'acq_software':['[t]',cfg_metadata['version_cytoUSB']],'acq_pixel_um':['[f]',cfg_metadata['pixel_size_cytosense']],'acq_frequency_fps':['[f]',cfg_metadata['fps_cytosense']],'acq_max_width_um':['[f]',cfg_metadata['width_cytosense']*cfg_metadata['pixel_size_cytosense']],'acq_max_height_um':['[f]',cfg_metadata['height_cytosense']*cfg_metadata['pixel_size_cytosense']]})
 df_processing_lexplore_cytosense=pd.DataFrame({'process_operator':['[t]',cfg_metadata['instrument_operator']],'process_code':['[t]','https://github.com/mdugenne/Lexplore_ALGA'],'process_min_diameter_um':['[f]',10],'process_max_diameter_um':['[f]',cfg_metadata['width_cytosense']*cfg_metadata['pixel_size_cytosense']],'process_gamma':['[f]',0.7]})
 
-df_context_flowcam_micro=pd.read_csv(r'{}'.format(cfg_metadata['flowcam_10x_context_file']),sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains("\[",case=True)').set_index('Name').T.rename(index={'Value':Path(cfg_metadata['flowcam_10x_context_file']).stem})
-df_context_flowcam_macro=pd.read_csv(r'{}'.format(cfg_metadata['flowcam_macro_context_file']),sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains("\[",case=True)').set_index('Name').T.rename(index={'Value':Path(cfg_metadata['flowcam_macro_context_file']).stem})
+df_context_flowcam_micro=pd.read_csv(r'{}'.format(cfg_metadata['flowcam_10x_context_file']),sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains(r"\[",case=True)').set_index('Name').T.rename(index={'Value':Path(cfg_metadata['flowcam_10x_context_file']).stem})
+df_context_flowcam_macro=pd.read_csv(r'{}'.format(cfg_metadata['flowcam_macro_context_file']),sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains(r"\[",case=True)').set_index('Name').T.rename(index={'Value':Path(cfg_metadata['flowcam_macro_context_file']).stem})
 
 
 df_sample_lexplore_flowcam=pd.DataFrame({'sample_longitude':['[f]',cfg_metadata['longitude']],'sample_latitude':['[f]',cfg_metadata['latitude']],'sample_platform':['[t]',cfg_metadata['program']],'sample_project':['[t]',cfg_metadata['project']],'sample_principal_investigator':['[t]',cfg_metadata['principal_investigator']],'sample_depthprofile':['[t]','False'],'sample_storage_gear':['[t]','wasam'],'sample_fixative':['[t]','glutaraldehyde'],'sample_fixative_final_concentration':['[f]',0.25] })
@@ -193,7 +206,7 @@ def generate_ecotaxa_table(df,instrument,path_to_storage=None):
              'object_depth_max': ['[f]'] + [as_float_cytosense_depth(df.Sample.astype(str).values[0][:-17].split('_')[-1])/100] * len(df)
              }),pd.concat([pd.DataFrame(dict(zip(('object_'+pd.Series(dict_properties_types.keys())).values,list(dict_properties_types.values())))),df.rename(columns=dict(zip(list(df.columns),list('object_'+df.columns))))[list(('object_'+pd.Series(dict_properties_types.keys())).values)]],axis=0).drop(columns=['object_image_intensity','object_slice']).reset_index(drop=True)],axis=1).reset_index(drop=True)
         df_ecotaxa_sample=pd.concat([pd.concat([pd.DataFrame({'sample_id': ['[t]'] + list(df.Sample.astype(str).values)}),pd.concat([df_sample_lexplore_cytosense,*[df_sample_lexplore_cytosense.tail(1)]*(len(df)-1)],axis=0).reset_index(drop=True)],axis=1),pd.DataFrame({'sample_volume_analyzed_ml': ['[f]'] + list(df.sample_volume_analyzed_ml.values),'sample_volume_pumped_ml': ['[f]'] + list(df.sample_volume_pumped_ml.values),'sample_volume_fluid_imaged_ml': ['[f]'] + list(df.sample_volume_fluid_imaged_ml.values),'sample_duration_sec': ['[f]'] + list(df.sample_duration_sec.values)})],axis=1)
-        df_ecotaxa_acquisition=pd.concat([pd.concat([df_acquisition_lexplore_cytosense,*[df_acquisition_lexplore_cytosense.tail(1)]*(len(df)-1)],axis=0).reset_index(drop=True),pd.DataFrame({'acq_trigger_channel': ['[t]'] + list(df.sample_trigger.values),'acq_trigger_threshold_mv': ['[t]'] + list(df.sample_trigger_threshold_mv.values)})],axis=1)
+        df_ecotaxa_acquisition=pd.concat([pd.concat([df_acquisition_lexplore_cytosense,*[df_acquisition_lexplore_cytosense.tail(1)]*(len(df)-1)],axis=0).reset_index(drop=True),pd.DataFrame({'acq_flow_rate': ['[f]'] + list(df.sample_flow_rate.astype(float).values),'acq_trigger_channel': ['[t]'] + list(df.sample_trigger.astype(str).values),'acq_trigger_threshold_mv': ['[f]'] + list(df.sample_trigger_threshold_mv.astype(float).values)})],axis=1)
         df_ecotaxa_process=pd.concat([df_processing_lexplore_cytosense,*[df_processing_lexplore_cytosense.tail(1)]*(len(df)-1)],axis=0).reset_index(drop=True)
         df_ecotaxa=pd.concat([df_ecotaxa_object,df_ecotaxa_sample,df_ecotaxa_acquisition,df_ecotaxa_process],axis=1)
 
@@ -202,5 +215,5 @@ def generate_ecotaxa_table(df,instrument,path_to_storage=None):
     else:
         print('Instrument not supported, please specify either "CytoSense" or "FlowCam". Quitting')
     if len(path_to_storage):
-        df_ecotaxa.to_csv(path_to_storage, sep='\t')
+        df_ecotaxa.to_csv(path_to_storage, sep='\t',index=False)
     return df_ecotaxa

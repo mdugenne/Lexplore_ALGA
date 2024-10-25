@@ -1,8 +1,15 @@
 ## Objective: This script was written to test a set of image processing steps on Python
+import pandas as pd
+import skimage.morphology
 
-import warnings
-warnings.filterwarnings("ignore")
-from natsort import natsorted
+# Load modules and functions required for image processing
+
+try:
+    from funcs_image_processing import *
+
+except:
+    from scripts.funcs_image_processing import *
+
 #Digits recognition
 import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
 pytesseract.pytesseract.tesseract_cmd = r'{}\AppData\Local\Programs\Tesseract-OCR\tesseract'.format(str(Path.home()))
@@ -19,11 +26,11 @@ summary_metadata_columns=['Mode', 'Priming_Method', 'Flow_Rate', 'Recalibrations
        'SerialNo', 'Number_of_Processors', 'Pump', 'Syringe_Size','Skip']
 
 #Workflow starts here
-path_to_network=Path("R:") # Set working directory to forel-meco
+path_to_network=Path("{}:".format(cfg_metadata['local_path_storage'])) # Set working directory to forel-meco
 # Load metadata files (volume imaged, background pixel intensity, etc.) and save entries into separate tables (metadata and statistics)
 metadatafiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_10x_lexplore*/*_summary.csv'))
 df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name})),df:=df[[col for col in df.columns if col in summary_metadata_columns]])[-1],metadatafiles),axis=0)
-#Check the fluid volume imaged calculation based on the number of frames used. If
+#Check the fluid volume imaged calculation based on the number of frames used.
 df_metadata.Used.astype(float)/df_metadata.Fluid_Volume_Imaged.str.split(' ').str[0].astype(float)
 # This should be constant if the area of acceptable region, the size calibration, and the depth of the flow cell are kept constant
 df_particle_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).reset_index(drop=True),df:=df[df.query('Name.str.contains(r"\=",case=True)').index[0]:].reset_index(drop=True) ,df_summary_statistics:=pd.DataFrame([(df.query('Name.str.contains(r"\=",case=True)').index).tolist(),((df.query('Name.str.contains(r"\=",case=True)').index)[1:]-1).tolist()+[len(df)]]).T.apply(lambda id:{df.loc[id[0],'Name'].split(' ')[1]:pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),df.loc[id[0]+1:id[1],'Value'].values.tolist()[1].split(','))),index=[file.parent.name]) if len(df.loc[id[0]+1:id[1],'Value'].values.tolist())>1 else pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),[np.nan]*len(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(',')))),index=[file.parent.name])},axis=1,result_type='reduce'),final_df:=list(df_summary_statistics[[id for id,key in df_summary_statistics.items() if 'Particle' in key.keys()][0]].values())[0] if len([id for id,key in df_summary_statistics.items() if 'Particle' in key.keys()]) else pd.DataFrame({},index=[file.parent.name]))[-1],metadatafiles),axis=0)
@@ -33,7 +40,7 @@ df_summary_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',
 df_pixel=df_metadata[['Magnification','Calibration_Factor']]
 
 # Load context file for cropping area
-contextfiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions').rglob('*.ctx'))
+contextfiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions').rglob('*_10x_*.ctx'))
 df_context=pd.concat(map(lambda file:pd.read_csv(file,sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains("\[",case=True)').set_index('Name').T.rename(index={'Value':file.parent.name}),contextfiles))
 df_cropping=df_context[['AcceptableTop','AcceptableBottom','AcceptableLeft','AcceptableRight']]
 
@@ -43,8 +50,22 @@ runfiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data'
 
 mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_*.png')))),runfiles))
 
+# Loop through sample to generate thumbnails and ecotaxa tables:
+df_properties_all=pd.DataFrame()
+df_volume=pd.DataFrame()
+df_nbss=pd.DataFrame()
 for sample in list(mosaicfiles.keys()):
     particle_id = 0
+    df_volume =pd.concat([df_volume,df_metadata.loc[sample]],axis=0)
+    path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
+    if path_to_data.exists():
+        df_properties_sample=pd.read_csv(path_to_data,encoding='latin-1',index_col='Capture ID')
+    else:
+        df_properties_sample=pd.DataFrame(dict(zip(list(dict_properties_visual_spreadsheet.keys()),[pd.NA]*len((dict_properties_visual_spreadsheet.keys())))),index=[0])
+    # Load the background image to performs segmentation and re-compute morphometric properties using the same algorithm as CytoSense
+    cropping_area = df_cropping.loc['acquisitions']
+    background = ski.io.imread(path_to_data.parent/'cal_image_000001.tif' ,as_gray=True)#[int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]
+    ##plt.figure(),plt.imshow(cv2.cvtColor(background, cv2.COLOR_BGR2RGB), cmap='gray'),plt.show()
     with tqdm(desc='Generating vignettes for run {}'.format(sample), total=len(natsorted(mosaicfiles[sample])), bar_format='{desc}{bar}', position=0, leave=True) as bar:
         for file in natsorted([str(file) for file in mosaicfiles[sample]]):
 
@@ -53,9 +74,10 @@ for sample in list(mosaicfiles.keys()):
             bar.set_description('Generating vignettes for run {} (%s%%)'.format(sample) % percent, refresh=True)
             sample_id=file.parent.name
 
-            # Crop the bottom pixels (-30 pixels) of the mosaic, otherwise tall particles may coincide with the bottom caption and be discarded
+
+            # Crop the bottom pixels (-30 pixels) of the mosaic, otherwise long particles may coincide with the bottom caption and be discarded
             image,colored_image = ski.io.imread(file,as_gray=True)[slice(None, -30, None)],ski.io.imread(file,as_gray=False)[slice(None, -30, None)]
-            ##plt.imshow(image, cmap='gray'),plt.show()
+            ##plt.figure(),plt.imshow(image, cmap='gray'),plt.show()
 
             # Perform segmentation
 
@@ -95,8 +117,8 @@ for sample in list(mosaicfiles.keys()):
 
 
                 vignette_id=np.pad(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
-                ##plt.figure(),plt.imshow(vignette_id, cmap='gray'),plt.show()
-                ''' # Obsolete unless some particles got deleted in visualspreadsheet
+                ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)], cmap='gray'),plt.show()
+                ''' # Obsolete unless some particles got deleted in visualspreadsheet and not properly identified in the sample summary file
                 capture_id=np.pad(np.where(np.in1d(labelled,labelid_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[labelid_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
                 
                 fig,axes=plt.subplots(1,1)
@@ -138,7 +160,65 @@ for sample in list(mosaicfiles.keys()):
                 save_direcotry.mkdir(parents=True,exist_ok=True)
                 fig.savefig(fname=str( save_direcotry/ 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(),str(particle_id).rstrip())), bbox_inches="tight")
                 plt.close('all')
+
+                #Use background image to perform de novo segmentation
+
+                cropped_top=df_properties_sample.loc[particle_id,'Capture Y']
+                cropped_bottom=cropped_top+df_properties_sample.loc[particle_id,'Image Height']
+                cropped_left=df_properties_sample.loc[particle_id,'Capture X']
+                cropped_right = cropped_left+df_properties_sample.loc[particle_id, 'Image Width']
+                background_cropped=background[int(cropped_top):int(cropped_bottom),int(cropped_left):int(cropped_right)]
+                ##plt.figure(),plt.imshow(cv2.cvtColor(background_cropped, cv2.COLOR_BGR2RGB)),plt.show()
+                image_cropped = image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]
+                colored_image_cropped= colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]
+                ##plt.figure(),plt.imshow(colored_image_cropped),plt.show()
+                diff_image = compare_images(image_cropped,background_cropped, method='diff')
+                ##plt.figure(),plt.imshow(diff_image),plt.show()
+                edges = ski.filters.sobel(diff_image)
+                markers = np.zeros_like(diff_image)
+                markers[edges > np.quantile(edges, 0.85)] = 1
+                markers[(sp.ndimage.binary_closing(edges) == False)] = 0
+                fill_image = ski.morphology.closing(ski.morphology.dilation(ski.morphology.dilation(markers)))
+                fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(df_context.DistanceToNeighbor.astype(float).values[0]))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
+                ##plt.figure(), plt.imshow(fill_image, cmap='gray'), plt.show()
+                label_objects, nb_labels = sp.ndimage.label(fill_image)
+                label_objects = ski.morphology.remove_small_objects(label_objects, min_size=float( df_context.MinESD.values[0]) / pixel_size)
+                # plt.figure(),plt.imshow(label_objects.astype(bool).astype(int)),plt.show()
+
+                # Segmentation of the background in case flow cell was dirty
+                edges = ski.filters.sobel(background_cropped)
+                markers = np.zeros_like(background_cropped)
+                markers[edges > np.quantile(edges, 0.99)] = 1
+                markers[(sp.ndimage.binary_closing(edges) == False)] = 0
+
+                # plt.figure(),plt.imshow(markers, cmap='gray'),plt.show()
+                fill_image = sp.ndimage.binary_fill_holes(markers)
+                # plt.figure(),plt.imshow(fill_image),plt.show()
+                label_objects_background, nb_labels_background = sp.ndimage.label(fill_image)
+                label_objects_background = ski.morphology.remove_small_objects(label_objects_background, min_size=float( df_context.MinESD.values[0]) / pixel_size)
+                ## plt.figure(),plt.imshow(label_objects_background.astype(bool).astype(int)),plt.show()
+                ## plt.figure(), plt.imshow( label_objects_background.astype(bool).astype(int)-(label_objects.astype(bool).astype(int))),plt.show()
+                label_diff=label_objects.copy()
+                label_diff[(label_objects.astype(bool).astype(int)==1)&(label_objects_background.astype(bool).astype(int)-(label_objects.astype(bool).astype(int))!=-1)]=0
+                # plt.figure(),plt.imshow(label_diff),plt.show()
+                id_to_discard=pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).values != pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).values).flatten()]+1
+                if len(id_to_discard):
+                    label_objects[np.in1d(label_objects,id_to_discard).reshape(label_objects.shape)]=0
+                # plt.figure(),plt.imshow(label_objects),plt.show()
+                # plt.figure(),plt.imshow(label_objects.astype(bool).astype(int)),plt.show()
+                labelled_particle = measure.label(label_objects.astype(bool).astype(int))  # measure.label(ski.morphology.remove_small_holes(markers.astype(bool),connectivity=1))
+                ##plt.figure(), plt.imshow(labelled_particle, cmap='gray_r'), plt.show()
+
+                largest_object = labelled_particle == np.argmax(np.bincount(labelled_particle.flat)[1:]) + 1
+                ##plt.figure(), plt.imshow(largest_object, cmap='gray_r'), plt.show()
+                # Measure properties
+                df_properties_git = pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped,  properties=['area', 'area_bbox', 'area_convex', 'area_filled', 'axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local', 'centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals', 'intensity_mean', 'intensity_max', 'intensity_min', 'intensity_std', 'moments', 'moments_central', 'moments_hu', 'num_pixels', 'orientation', 'perimeter', 'slice']), index=[particle_id])
+
+
+
             bar.update(n=1)
+
+
 
 ## Generating Ecotaxa table
 with tqdm(desc='', total=len(list(mosaicfiles.keys())), bar_format='{desc}{bar}', position=0, leave=True) as bar:
@@ -150,7 +230,7 @@ with tqdm(desc='', total=len(list(mosaicfiles.keys())), bar_format='{desc}{bar}'
             df_data=pd.read_csv(path_to_data,encoding='latin-1')
             df_ecotaxa=pd.DataFrame({'img_file_name':['[t]']+list('thumbnail_'+sample+'_'+df_data['Capture ID'].astype(str)+'.png'),
                                      'img_rank':['[f]']+list(df_data['Group ID'].astype(float)),
-                                     'object_id':['[t]']+list('thumbnail_'+sample+'_'+df_data['Capture ID'].astype(str)+'.png'),
+                                     'object_id':['[t]']+list('thumbnail_'+sample+'_'+df_data['Capture ID'].astype(str)),
                                      'object_lat':['[f]']+[cfg_metadata['latitude']]*len(df_data),
                                      'object_lon':['[f]']+[cfg_metadata['longitude']]*len(df_data),
                                      'object_date':['[t]']+[sample.split('_')[4]]*len(df_data),
@@ -176,7 +256,7 @@ backgroundfiles,imagefiles=list(filter(lambda x: 'cal_' in x.name, outputfiles_r
 # Load image file
 file=natsorted(imagefiles)[-1]#Path('R:Imaging_Flowcam/Flowcam data/Lexplore/acquisitions/Flowcam_10x_lexplore_wasam_20241002_2024-10-03 07-23-04/rawfile_011039.tif')#imagefiles[538]
 sample_id=file.parent.name
-cropping_area=df_cropping.loc['Lexplore']
+cropping_area=df_cropping.loc['acquisitions']
 colored_image=ski.io.imread(file,)[int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]
 image = ski.io.imread(file,as_gray=True)[int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]
 background=ski.io.imread(file.parent / 'cal_image_000001.tif',as_gray=True)[int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]
@@ -198,17 +278,15 @@ plt.imshow(markers)
 pixel_size=df_pixel.Calibration_Factor.str.strip(' ').astype(float) #in microns per pixel
 filled_image=ski.morphology.remove_small_holes(ski.morphology.closing(markers,ski.morphology.square(int(np.ceil(int(df_context.DistanceToNeighbor.astype(float).values[0])/pixel_size.loc[sample_id])))).astype(bool))
 filled_image=ski.morphology.closing(ski.morphology.dilation(ski.morphology.dilation(markers)))
-plt.figure()
-plt.imshow(filled_image, cmap='gray')
+plt.figure(),plt.imshow(filled_image, cmap='gray'),plt.show()
 
 label_objects, nb_labels = sp.ndimage.label(filled_image)
 labelled = measure.label(filled_image)#measure.label(ski.morphology.remove_small_holes(markers.astype(bool),connectivity=1))
-plt.figure()
-plt.imshow(labelled, cmap='gray_r')
+plt.figure(),plt.imshow(labelled, cmap='gray_r'),plt.show()
 
-2*np.sqrt(np.bincount(labelled.flat)*(0.7339**2)/np.pi)>float(df_context.MinESD.values[0])
+2*np.sqrt(np.bincount(labelled.flat)*(pixel_size.loc[sample]**2)/np.pi)>float(df_context.MinESD.values[0])
 largest_object = labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
-plt.imshow(largest_object, cmap='gray_r')
+plt.figure(),plt.imshow(largest_object, cmap='gray_r'),plt.show()
 # Measure properties
 df_properties=pd.DataFrame(ski.measure.regionprops_table(label_image=largest_object.astype(int),intensity_image=image,properties=['area','area_bbox','area_convex','area_filled','axis_major_length','axis_minor_length','axis_major_length','bbox','centroid_local','centroid_weighted_local','eccentricity','equivalent_diameter_area','extent','image_intensity','inertia_tensor','inertia_tensor_eigvals','intensity_mean','intensity_max','intensity_min','intensity_std','moments','moments_central','moments_hu','num_pixels','orientation','perimeter','slice']),index=[file.parent.name])
 # Generate and save thumbnails
