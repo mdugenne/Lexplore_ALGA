@@ -1,4 +1,5 @@
 # Objective: This script performs a set of image processing steps on images acquired with the CytoSense imaging flow cytometer
+from plotnine import scale_shape
 
 # Load modules and functions required for image processing
 
@@ -8,7 +9,7 @@ try:
 except:
     from scripts.funcs_image_processing import *
 
-
+matplotlib.use('Qt5Agg')
 # Workflow starts here:
 
 # Load camera resolution from configuration file and calibration file used to convert flow rate into volume imaged assuming sample core is a cylinder of width equivalent to the frame width and diameter indicated in the calibration file
@@ -16,16 +17,34 @@ pixel_size= cfg_metadata['pixel_size_cytosense'] #in microns per pixel
 frame_width=cfg_metadata['width_cytosense'] #in pixels
 df_calibration_flowrate=pd.read_csv(path_to_git / 'data' / 'Cytosense_calibration_flowrate_volume.csv')
 reg_calibration=api.ols(formula='Cylinder_diameter~Flow_rate', data=df_calibration_flowrate).fit()
+if not Path('{}/figures/Initial_test/cytosense_calibration_flowrate.png'.format(str(path_to_git))).exists():
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x=df_calibration_flowrate.dropna(subset=['Flow_rate','Cylinder_diameter']).Flow_rate,   y=df_calibration_flowrate.dropna(subset=['Flow_rate','Cylinder_diameter']).Cylinder_diameter)
+    plot = (ggplot(data=df_calibration_flowrate.assign(diameter=lambda x: np.where(x.Cylinder_diameter.isna(),reg_calibration.predict(pd.DataFrame({'Flow_rate':x.Flow_rate})),x.Cylinder_diameter))) +
+            geom_abline(slope=slope, intercept=intercept, alpha=1) +
+            geom_point(aes(x='Flow_rate', y='diameter',shape='Cylinder_diameter.isna()'), size=5) +
+            scale_shape_manual(limits=[True,False],values={True:"x",False:"o"})+
+            labs(x='FLow rate ($\mu$L s$^{-1}$)', y=r'Sample core diameter ($\mu$m)') +
+            scale_colour_manual(values={True:'#{:02x}{:02x}{:02x}{:02x}'.format(0, 0 , 0,10),False:'black'},guide=None)+
+            annotate('text', label='y = ' + str(np.round( slope, 3)) + 'x ' + str( np.round(intercept, 2)) + ', R$^{2}$ = ' + str(np.round(r_value, 3)), x=np.nanquantile(df_calibration_flowrate['Flow_rate'], [0.999]), y=np.nanquantile(df_calibration_flowrate['Cylinder_diameter'], [0.999]), ha='right') +
+            theme_paper+theme(axis_title=element_text(size=16),axis_text=element_text(size=16))).draw(show=False)
+    plot.savefig(fname='{}/figures/Initial_test/cytosense_calibration_flowrate.png'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 
 path_to_network=Path("R:{}".format(os.path.sep)) # Set working directory to forel-meco
 outputfiles = list(Path(Path.home() / 'Documents'/'My CytoSense'/'Outputfiles').expanduser().rglob('*.jpg'))
 
-exportfiles=natsorted(list(Path(path_to_network /'lexplore' / 'LeXPLORE' / 'export files' / 'IIF' ).expanduser().rglob('lexplore_lakewater_surface_smart*.zip')))#
+exportfiles=natsorted(list(Path(path_to_network /'lexplore' / 'LeXPLORE' / 'export files' / 'IIF' ).expanduser().rglob('lexplore_lakewater_surface_smart*_Images.zip')))#
 path_to_images=list()
 for file in exportfiles:
-    path_to_images.append(Path(file.parent /file.name.replace(' ','_').replace('.zip','')).expanduser())
-    if not Path(file.parent / file.name.replace(' ','_').replace('.zip','')).expanduser().exists():
-        shutil.unpack_archive(file, file.parent / file.name.replace(' ','_').replace('.zip','')) # Unzip export file
+    if len(re.findall(r'_All Imaged Particles_|_IIF_',file.stem)):
+        file.unlink(missing_ok=True) #Delete redundant image directories
+
+    else:
+        path_to_images.append(Path(file.parent /file.name.replace(' ','_').replace('.zip','')).expanduser())
+        if not Path(file.parent / file.name.replace(' ','_').replace('.zip','')).expanduser().exists():
+            try:
+                shutil.unpack_archive(file, file.parent / file.name.replace(' ','_').replace('.zip','')) # Unzip export file
+            except:
+                print(r'Error uncompressing folder {}.\n Please check and re-export if needed'.format(str(file)))
 
 
 imagefiles=dict(map(lambda file: ('_'.join(file.name.split('_')[:-1]),natsorted(list(file.rglob('*_Cropped_*.jpg')))),path_to_images))
@@ -45,7 +64,7 @@ for sample in list(imagefiles.keys()):
             cytosense_processing_time_correction=df_sets.query('Set=="All Imaged Particles"').Count.values[0]/df_sets.query('Set=="IIF_large"').Count.values[0]
         else:
             cytosense_processing_time_correction =len(imagefiles[sample]) / float(df_volume_sample['Total number of particles'].values[0].lstrip())
-        df_volume_sample=df_volume_sample.assign(Volume_analyzed=lambda x: x.Volume_analyzed.astype(float)*1e-03,Volume_pumped=lambda x: x['Flow rate (μL/sec)'].astype(float)*x.Measurement_duration.astype(float)*1e-03,Volume_Fluid_imaged=lambda x: np.pi*(reg_calibration.predict(pd.DataFrame({'Flow_rate':x['Flow rate (μL/sec)'].astype(float)}))*1e-03/2)*frame_width*pixel_size*1e-03*cfg_metadata['fps_cytosense']*x.Measurement_duration.astype(float)*1e-03).assign(Volume_Fluid_imaged=lambda x:x.Volume_Fluid_imaged*cytosense_processing_time_correction*(x.Volume_analyzed/x.Volume_Fluid_imaged)).rename(columns={'Flow rate (μL/sec)':'Flow_rate'})
+        df_volume_sample=df_volume_sample.assign(Volume_analyzed=lambda x: x.Volume_analyzed.astype(float)*1e-03,Volume_pumped=lambda x: x['Flow rate (μL/sec)'].astype(float)*x.Measurement_duration.astype(float)*1e-03,Volume_Fluid_imaged=lambda x: np.pi*(reg_calibration.predict(pd.DataFrame({'Flow_rate':x['Flow rate (μL/sec)'].astype(float)}))*1e-03/2)*frame_width*pixel_size*1e-03*cfg_metadata['fps_cytosense']*x.Measurement_duration.astype(float)*1e-03).rename(columns={'Flow rate (μL/sec)':'Flow_rate'})#.assign(Volume_Fluid_imaged=lambda x:x.Volume_Fluid_imaged*cytosense_processing_time_correction*(x.Volume_analyzed/x.Volume_Fluid_imaged))
         df_volume = pd.concat([df_volume,df_volume_sample], axis=0)
     else:
         df_volume = pd.concat([df_volume,pd.DataFrame(index=[sample])],axis=0)
@@ -66,7 +85,7 @@ for sample in list(imagefiles.keys()):
             markers[edges>np.quantile(edges,0.85)] = 1
             markers[(sp.ndimage.binary_closing(edges) ==False)] = 0
 
-            #plt.imshow(markers, cmap='gray'),plt.show()
+            #plt.figure(),plt.imshow(markers, cmap='gray'),plt.show()
             fill_image = sp.ndimage.binary_fill_holes(markers)
             #plt.figure(),plt.imshow(fill_image),plt.show()
             label_objects, nb_labels = sp.ndimage.label(fill_image)
@@ -74,7 +93,7 @@ for sample in list(imagefiles.keys()):
 
             #Watershed segmentation
             elevation_map = ski.filters.sobel(image)
-            #plt.imshow(elevation_map , cmap='gray')
+            #plt.figure(),plt.imshow(elevation_map , cmap='gray')
             '''
             #Canny edge detection
             edges=ski.feature.canny(image,sigma=0.003 )
@@ -98,7 +117,7 @@ for sample in list(imagefiles.keys()):
             label_objects, nb_labels = sp.ndimage.label(markers)
             #plt.imshow(label_objects)
             '''
-            # Fix the lowest object size to 5 um
+            # Fix the lowest object size to 10 um
             largest_object_size=np.pi*(10*pixel_size/2)**2#np.quantile(np.sort(np.bincount(label_objects.flat))[::-2],q=0.9975)
             #largest_object_size=np.sort(np.bincount(label_objects.flat))[-2]
             large_markers = ski.morphology.remove_small_objects(label_objects, min_size=largest_object_size-1)
@@ -112,7 +131,7 @@ for sample in list(imagefiles.keys()):
             # plt.figure(),plt.imshow(label_markers, cmap=plt.cm.gray),plt.show()
 
             segmented_image = ski.segmentation.watershed(elevation_map, markers)
-            #plt.imshow(segmented_image, cmap=plt.cm.gray),plt.show()
+            #plt.figure(),plt.imshow(segmented_image, cmap=plt.cm.gray),plt.show()
 
             labelled = measure.label(large_markers)
             largest_object =np.isin(labelled, np.arange(0,len((np.bincount(labelled.flat)[1:])))+1) #labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
@@ -177,7 +196,7 @@ plot = (ggplot(df_nbss) +
         guides(colour=None,fill=None)+
         theme_paper).draw(show=False)
 
-plot.savefig(fname='{}/figures/Initial_test/cytosense_test_nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
+plot.savefig(fname='{}/figures/Initial_test/cytosense_nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 
 '''
 # Processing raw frames

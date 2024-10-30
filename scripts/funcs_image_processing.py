@@ -23,6 +23,7 @@ path_to_config = path_to_git / 'data' / 'Lexplore_metadata.yaml'
 with open(path_to_config, 'r') as config_file:
     cfg_metadata = yaml.safe_load(config_file)
 import shutil # zip folder
+import re
 
 # Data processing modules
 import numpy as np
