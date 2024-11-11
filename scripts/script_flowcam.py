@@ -16,14 +16,6 @@ pytesseract.pytesseract.tesseract_cmd = r'{}\AppData\Local\Programs\Tesseract-OC
 
 
 # Identification of the variables of interest in visualspreadsheet summary tables
-summary_metadata_columns=['Mode', 'Priming_Method', 'Flow_Rate', 'Recalibrations', 'Stop_Reason',
-       'Sample_Volume_Aspirated', 'Sample_Volume_Processed',
-       'Fluid_Volume_Imaged', 'Efficiency', 'Particle_Count', 'Total', 'Used',
-       'Percentage_Used', 'Particles_Per_Image', 'Frame_Rate',
-       'Background_Intensity_Mean', 'Background_Intensity_Min',
-       'Background_Intensity_Max', 'Start_Time', 'Sampling_Time',
-       'Environment', 'Software', 'Magnification', 'Calibration_Factor',
-       'SerialNo', 'Number_of_Processors', 'Pump', 'Syringe_Size','Skip']
 
 #Workflow starts here
 path_to_network=Path("{}:".format(cfg_metadata['local_path_storage'])) # Set working directory to forel-meco

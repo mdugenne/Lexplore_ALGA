@@ -62,6 +62,14 @@ theme_paper=theme(panel_grid=element_blank(), legend_position='bottom',
               axis_text_y=element_text(family='Times New Roman', size=12, rotation=90, linespacing=1),
               plot_background=element_rect(fill='#ffffff00'))
 import seaborn as sns
+summary_metadata_columns=['Mode', 'Priming_Method', 'Flow_Rate', 'Recalibrations', 'Stop_Reason',
+       'Sample_Volume_Aspirated', 'Sample_Volume_Processed',
+       'Fluid_Volume_Imaged', 'Efficiency', 'Particle_Count', 'Total', 'Used',
+       'Percentage_Used', 'Particles_Per_Image', 'Frame_Rate',
+       'Background_Intensity_Mean', 'Background_Intensity_Min',
+       'Background_Intensity_Max', 'Start_Time', 'Sampling_Time',
+       'Environment', 'Software', 'Magnification', 'Calibration_Factor',
+       'SerialNo', 'Number_of_Processors', 'Pump', 'Syringe_Size','Skip']
 
 
 # Size spectrum processing
