@@ -6,6 +6,7 @@ longitude : 6.6608352777777778 #Sampling longitude, decimal degrees
 principal_investigator : 'Bastiaan Ibelings'
 instrument_operator : 'Irene Muscas / Mathilde Dugenne'
 wasam_sampling_time : '090000' #hhmmss
+wasam_sampling_depth : 3.7 #meters
 local_path_storage : 'R' #Name of the local network/directory where data/exportfiles are stored
 flowcam_10x_context_file : 'R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_10x_lexplore.ctx' # Local path to context file for the FlowCam 10x acquisitions
 flowcam_macro_context_file : 'R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_5mm_lexplore.ctx' # Local path to context file for the FlowCam macro acquisitions

@@ -10,7 +10,7 @@ try:
 except:
     from scripts.funcs_image_processing import *
 
-#Digits recognition
+#Digits recognition - This is obsolete as long as mosaic are saved after sorting images by capture ID
 import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
 pytesseract.pytesseract.tesseract_cmd = r'{}\AppData\Local\Programs\Tesseract-OCR\tesseract'.format(str(Path.home()))
 
@@ -46,9 +46,10 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys()):
+for sample in list(mosaicfiles.keys())[0:1]:
+    df_properties_sample_merged=pd.DataFrame()
     particle_id = 0
-    df_volume =pd.concat([df_volume,df_metadata.loc[sample]],axis=0)
+    df_volume =pd.concat([df_volume,df_metadata.loc[sample].to_frame().T],axis=0)
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     if path_to_data.exists():
         df_properties_sample=pd.read_csv(path_to_data,encoding='latin-1',index_col='Capture ID')
@@ -81,7 +82,7 @@ for sample in list(mosaicfiles.keys()):
             labelled = measure.label(mask,background=1)
             ##plt.figure(),plt.imshow(labelled),plt.show()
 
-            # Measure region properties to look for rectangular blobs, a.k.a vignettes
+            # Measure region properties to look for rectangular blobs, a.k.a thumbnails
             df_properties=pd.DataFrame(ski.measure.regionprops_table(label_image=labelled,intensity_image=image,properties=['area_convex','area_bbox','axis_major_length','axis_minor_length','bbox','extent','slice']))
             # Identify and plot rectangular regions (=vignettes), except for the last two corresponding to the period in the bottom sentence displayed on the mosaic ('Property shown : Capture ID')
 
@@ -94,9 +95,9 @@ for sample in list(mosaicfiles.keys()):
             # A line should be added manually in the summary export files to inform the particles ID (capture ID) that were manually filtered out
             # e.g. Particle Count, 3300
             #      Skip,[2235:2253]+[2255:2264]+[2266]
-            if len(df_metadata.loc[sample_id,'Skip']):
+            if df_metadata.astype({'Skip':str}).loc[sample_id,'Skip']!='nan':
                 id_to_skip = sum(list(map(lambda id: list(np.arange(int(re.sub('\W+', '', id.split(':')[0])), int(re.sub('\W+', '', id.split(':')[1])) + 1)) if len( id.split(':')) == 2 else [int(re.sub('\W+', '', id))], df_metadata.loc[sample_id, 'Skip'].split(r']+['))), [])
-                if len(id_to_skip)!=(int(df_metadata.loc[sample_id,'Particle_Count'])-int(df_summary_statistics.loc[sample_id,'Count'])):
+                if len(id_to_skip)!=(int(df_metadata.astype({'Particle_Count':float}).loc[sample_id,'Particle_Count'])-int(df_summary_statistics.loc[sample_id,'Count'])):
                     print('\nAttention, Number of particles to skip is different than the difference between total particle count and particle count in the "Metadata statistics table".\nSkipping run {}. Please check the summary file and data file for missing particles'.format(sample_id))
                     continue
             else:
@@ -132,26 +133,6 @@ for sample in list(mosaicfiles.keys()):
                 print(pytesseract.image_to_string(np.where(np.in1d(labelled,labelid_idx[0]).reshape(labelled.shape),image,0),config='--psm 13 outputbase digits'))
                 '''
 
-                #Split the mosaic according to the slices of rectangular regions
-                pixel_size=float(df_pixel.at[file.parent.name,'Calibration_Factor'].strip(' ')) #in microns per pixel
-                scale_value = 50 # size of the scale bar in microns
-                padding= int((np.ceil(scale_value/pixel_size)+10)/2)
-                fig,axes=plt.subplots(1,1)
-                ##fig.tight_layout(pad=0, h_pad=0, w_pad=-1)
-                plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],((25,25),(padding,padding),(0,0)), 'constant',constant_values=float(df_metadata.at[file.parent.name,'Background_Intensity_Mean'])), cmap='gray')
-                axes.set_axis_off()
-                scalebar=AnchoredSizeBar(transform=axes.transData,size=scale_value/pixel_size,
-                                           label='{} $\mu$m'.format(scale_value), loc='lower center',
-                                           pad=0.1,
-                                           color='white',
-                                           frameon=False,
-                                           fontproperties=fontprops)
-                axes.add_artist(scalebar)
-                #axes.set_title('Particle ID: {}'.format(str(particle_id)))
-                save_direcotry=Path(str(file.parent).replace('acquisitions','ecotaxa')).expanduser()
-                save_direcotry.mkdir(parents=True,exist_ok=True)
-                fig.savefig(fname=str( save_direcotry/ 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(),str(particle_id).rstrip())), bbox_inches="tight")
-                plt.close('all')
 
                 #Use background image to perform de novo segmentation
 
@@ -160,15 +141,20 @@ for sample in list(mosaicfiles.keys()):
                 cropped_left=df_properties_sample.loc[particle_id,'Capture X']
                 cropped_right = cropped_left+df_properties_sample.loc[particle_id, 'Image Width']
                 background_cropped=background[int(cropped_top):int(cropped_bottom),int(cropped_left):int(cropped_right)]
+
                 ##plt.figure(),plt.imshow(cv2.cvtColor(background_cropped, cv2.COLOR_BGR2RGB)),plt.show()
                 image_cropped = image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]
                 colored_image_cropped= colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]
                 ##plt.figure(),plt.imshow(colored_image_cropped),plt.show()
+                if background_cropped.shape!=image_cropped.shape:
+                    background_cropped=background_cropped[slice(None, -1*(background_cropped.shape[0]-image_cropped.shape[0]), None)]
                 diff_image = compare_images(image_cropped,background_cropped, method='diff')
                 ##plt.figure(),plt.imshow(diff_image),plt.show()
                 edges = ski.filters.sobel(diff_image)
                 markers = np.zeros_like(diff_image)
-                markers[edges > np.quantile(edges, 0.85)] = 1
+                markers[diff_image > (1/df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].max(axis=1).values)] = 1
+                #markers[edges > np.quantile(edges, 0.85)] = 1
+
                 markers[(sp.ndimage.binary_closing(edges) == False)] = 0
                 fill_image = ski.morphology.closing(ski.morphology.dilation(ski.morphology.dilation(markers)))
                 fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(df_context.DistanceToNeighbor.astype(float).values[0]))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
@@ -198,18 +184,48 @@ for sample in list(mosaicfiles.keys()):
                     label_objects[np.in1d(label_objects,id_to_discard).reshape(label_objects.shape)]=0
                 # plt.figure(),plt.imshow(label_objects),plt.show()
                 # plt.figure(),plt.imshow(label_objects.astype(bool).astype(int)),plt.show()
+                label_markers, nb_labels = sp.ndimage.label(label_objects.astype(bool).astype(int))
                 labelled_particle = measure.label(label_objects.astype(bool).astype(int))  # measure.label(ski.morphology.remove_small_holes(markers.astype(bool),connectivity=1))
                 ##plt.figure(), plt.imshow(labelled_particle, cmap='gray_r'), plt.show()
+                if nb_labels>0: #Otherwise, particle was entirely in the background and should be discarded
+                    largest_object = labelled_particle == np.argmax(np.bincount(labelled_particle.flat)[1:]) + 1
+                    ##plt.figure(), plt.imshow(largest_object, cmap='gray_r'), plt.show()
+                    largest_object = np.isin(labelled_particle, np.arange(0, len((np.bincount(labelled_particle.flat)[ 1:]))) + 1)  # labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
 
-                largest_object = labelled_particle == np.argmax(np.bincount(labelled_particle.flat)[1:]) + 1
-                ##plt.figure(), plt.imshow(largest_object, cmap='gray_r'), plt.show()
-                # Measure properties
-                df_properties_git = pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped,  properties=['area', 'area_bbox', 'area_convex', 'area_filled', 'axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local', 'centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals', 'intensity_mean', 'intensity_max', 'intensity_min', 'intensity_std', 'moments', 'moments_central', 'moments_hu', 'num_pixels', 'orientation', 'perimeter', 'slice']), index=[particle_id])
+                    # Measure properties
+                    df_properties_git = pd.concat([pd.DataFrame({'Capture ID':str(particle_id).rstrip(),'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id]), pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped, properties=['area', 'area_bbox', 'area_convex', 'area_filled','axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local','centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals','intensity_mean', 'intensity_max', 'intensity_min','intensity_std', 'moments', 'moments_central', 'moments_hu', 'num_pixels', 'orientation', 'perimeter', 'slice']), index=[particle_id])], axis=1) if nb_labels > 0 else pd.DataFrame({'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id])
+                    df_properties_sample_merged = pd.concat([df_properties_sample_merged, df_properties_git],axis=0).reset_index(drop=True)
 
-
+                    # Split the mosaic according to the slices of rectangular regions to generate thumbnail and save
+                    pixel_size = float(df_pixel.at[file.parent.name, 'Calibration_Factor'].strip(' '))  # in microns per pixel
+                    scale_value = 50  # size of the scale bar in microns
+                    padding = int((np.ceil(scale_value / pixel_size) + 10) / 2)
+                    fig, axes = plt.subplots(1, 1)
+                    ##fig.tight_layout(pad=0, h_pad=0, w_pad=-1)
+                    plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=float( df_metadata.at[file.parent.name, 'Background_Intensity_Mean'])), cmap='gray')
+                    axes.set_axis_off()
+                    scalebar = AnchoredSizeBar(transform=axes.transData, size=scale_value / pixel_size,
+                                               label='{} $\mu$m'.format(scale_value), loc='lower center',
+                                               pad=0.1,
+                                               color='white',
+                                               frameon=False,
+                                               fontproperties=fontprops)
+                    axes.add_artist(scalebar)
+                    # axes.set_title('Particle ID: {}'.format(str(particle_id)))
+                    save_directory = Path(str(file.parent).replace('acquisitions', 'ecotaxa')).expanduser()
+                    save_directory.mkdir(parents=True, exist_ok=True)
+                    fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip())),  bbox_inches="tight")
+                    plt.close('all')
 
             bar.update(n=1)
-
+    # Merge the de-novo properties datatable with FlowCam data, re-format for EcoTaxa and save
+    df_properties=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).reset_index().astype({'Capture ID':str}).assign(Sample=sample_id),how='left',on=['Sample','Capture ID'])
+    df_properties_all=pd.concat([df_properties_all, df_properties],axis=0).reset_index(drop=True)
+    filename_ecotaxa = str(save_directory /'ecotaxa_table_{}.tsv'.format(str(sample_id).rstrip()))
+    df_ecotaxa = generate_ecotaxa_table(df=pd.merge(df_properties,df_volume.loc[sample].to_frame().T.assign(Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
+    # Generate Normalized Biovolume Size Spectra
+    df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge(df_properties,df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float))[['volume']],how='left',right_index=True,left_on=['Sample']), pixel_size=pixel_size, grouping_factor=['Sample'])
+    df_nbss=pd.concat([df_nbss,df_nbss_sample],axis=0).reset_index(drop=True)
 
 
 ## Generating Ecotaxa table

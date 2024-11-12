@@ -166,6 +166,7 @@ dict_properties_types={'nb_particles':['[f]'], 'area':['[f]'], 'area_bbox':['[f]
        'moments_hu-0':['[f]'], 'moments_hu-1':['[f]'], 'moments_hu-2':['[f]'], 'moments_hu-3':['[f]'],
        'moments_hu-4':['[f]'], 'moments_hu-5':['[f]'], 'moments_hu-6':['[f]'], 'num_pixels':['[f]'],
        'orientation':['[f]'], 'perimeter':['[f]'], 'slice':['[t]']}
+dict_properties_types_colors=dict_properties_types | {'centroid_weighted_local-0-0':['[f]'],'centroid_weighted_local-0-1':['[f]'],'centroid_weighted_local-0-2':['[f]'], 'centroid_weighted_local-1':['[f]'],'centroid_weighted_local-1-1':['[f]'],'centroid_weighted_local-1-2':['[f]'], 'intensity_mean':['[f]'], 'intensity_max':['[f]'], 'intensity_min':['[f]'], 'intensity_std':['[f]'], 'intensity_mean-0':['[f]'], 'intensity_max-0':['[f]'], 'intensity_min-0':['[f]'], 'intensity_std-0':['[f]'],'intensity_mean-1':['[f]'], 'intensity_max-1':['[f]'], 'intensity_min-1':['[f]'], 'intensity_std-1':['[f]'],'intensity_mean-2':['[f]'], 'intensity_max-2':['[f]'], 'intensity_min-2':['[f]'], 'intensity_std-2':['[f]']}
 dict_properties_visual_spreadsheet={'Name':['[t]'], 'Area (ABD)':['[f]'], 'Area (Filled)':['[f]'], 'Aspect Ratio':['[f]'], 'Average Blue':['[f]'],
        'Average Green':['[f]'], 'Average Red':['[f]'], 'Calibration Factor':['[f]'],
        'Calibration Image':['[f]'], 'Capture ID':['[t]'] ,'Capture X':['[f]'], 'Capture Y':['[f]'], 'Circularity':['[f]'],
@@ -220,7 +221,21 @@ def generate_ecotaxa_table(df,instrument,path_to_storage=None):
         df_ecotaxa=pd.concat([df_ecotaxa_object,df_ecotaxa_sample,df_ecotaxa_acquisition,df_ecotaxa_process],axis=1)
 
     elif instrument.lower()=='flowcam':
-        print('Not ready')
+        df_ecotaxa_object=pd.concat([pd.DataFrame(
+            {'img_file_name': ['[t]'] + list(df.img_file_name.values),
+             'object_id': ['[t]'] + list(df.img_file_name.astype(str).str.replace('.png','').values),
+             'object_lat': ['[f]'] + [cfg_metadata['latitude']] * len(df),
+             'object_lon': ['[f]'] + [cfg_metadata['longitude']] * len(df),
+             'object_date': ['[t]'] + [df.Sample.astype(str).values[0].split('_')[-2].replace('-','')] * len(df),
+             'object_time': ['[t]'] + [cfg_metadata['wasam_sampling_time']] * len(df),
+             'object_depth_min': ['[f]'] + [cfg_metadata['wasam_sampling_depth']] * len(df),
+             'object_depth_max': ['[f]'] + [cfg_metadata['wasam_sampling_depth']] * len(df)
+             }),pd.concat([pd.DataFrame(dict(zip(('object_'+pd.Series([key for key in dict_properties_types_colors.keys() if key in df.columns])).values,[value for key,value in dict_properties_types_colors.items() if key in df.columns]))),df.rename(columns=dict(zip([column for column in df.columns if column in dict_properties_types_colors.keys()],['object_'+column for column in df.columns if column in dict_properties_types_colors.keys()])))[['object_'+column for column in df.columns if column in dict_properties_types_colors.keys()]]],axis=0).drop(columns=['object_image_intensity','object_slice']).reset_index(drop=True)],axis=1).reset_index(drop=True)
+        df_ecotaxa_sample=pd.concat([pd.concat([pd.DataFrame({'sample_id': ['[t]'] + list(df.Sample.astype(str).values)}),pd.concat([df_sample_lexplore_flowcam,*[df_sample_lexplore_flowcam.tail(1)]*(len(df)-1)],axis=0).reset_index(drop=True)],axis=1),pd.DataFrame({'sample_volume_analyzed_ml': ['[f]'] + list(df.sample_volume_analyzed_ml.values),'sample_volume_pumped_ml': ['[f]'] + list(df.sample_volume_pumped_ml.values),'sample_volume_fluid_imaged_ml': ['[f]'] + list(df.sample_volume_fluid_imaged_ml.values),'sample_duration_sec': ['[t]'] + list(df.sample_duration_sec.values)})],axis=1)
+        df_ecotaxa_acquisition=pd.concat([pd.concat([df_acquisition_lexplore_flowcam_10x,*[df_acquisition_lexplore_flowcam_10x.tail(1)]*(len(df)-1)],axis=0).reset_index(drop=True),pd.DataFrame({'acq_flow_rate': ['[f]'] + list(df.sample_flow_rate.astype(float).values)})],axis=1)
+        df_ecotaxa_process=pd.concat([df_processing_lexplore_flowcam_10x,*[df_processing_lexplore_flowcam_10x.tail(1)]*(len(df)-1)],axis=0).reset_index(drop=True)
+        df_ecotaxa=pd.concat([df_ecotaxa_object,df_ecotaxa_sample,df_ecotaxa_acquisition,df_ecotaxa_process],axis=1)
+
     else:
         print('Instrument not supported, please specify either "CytoSense" or "FlowCam". Quitting')
     if len(path_to_storage):
