@@ -66,6 +66,7 @@ for sample in list(mosaicfiles.keys())[0:1]:
             percent = np.round(100 * (bar.n / len(mosaicfiles[sample])), 1)
             bar.set_description('Generating vignettes for run {} (%s%%)'.format(sample) % percent, refresh=True)
             sample_id=file.parent.name
+            pixel_size = float(df_pixel.at[file.parent.name, 'Calibration_Factor'].strip(' '))  # in microns per pixel
 
 
             # Crop the bottom pixels (-30 pixels) of the mosaic, otherwise long particles may coincide with the bottom caption and be discarded
@@ -133,7 +134,6 @@ for sample in list(mosaicfiles.keys())[0:1]:
                 print(pytesseract.image_to_string(np.where(np.in1d(labelled,labelid_idx[0]).reshape(labelled.shape),image,0),config='--psm 13 outputbase digits'))
                 '''
 
-
                 #Use background image to perform de novo segmentation
 
                 cropped_top=df_properties_sample.loc[particle_id,'Capture Y']
@@ -141,8 +141,8 @@ for sample in list(mosaicfiles.keys())[0:1]:
                 cropped_left=df_properties_sample.loc[particle_id,'Capture X']
                 cropped_right = cropped_left+df_properties_sample.loc[particle_id, 'Image Width']
                 background_cropped=background[int(cropped_top):int(cropped_bottom),int(cropped_left):int(cropped_right)]
-
                 ##plt.figure(),plt.imshow(cv2.cvtColor(background_cropped, cv2.COLOR_BGR2RGB)),plt.show()
+
                 image_cropped = image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]
                 colored_image_cropped= colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]
                 ##plt.figure(),plt.imshow(colored_image_cropped),plt.show()
@@ -154,8 +154,8 @@ for sample in list(mosaicfiles.keys())[0:1]:
                 markers = np.zeros_like(diff_image)
                 markers[diff_image > (1/df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].max(axis=1).values)] = 1
                 #markers[edges > np.quantile(edges, 0.85)] = 1
-
                 markers[(sp.ndimage.binary_closing(edges) == False)] = 0
+                ##plt.figure(), plt.imshow(markers, cmap='gray'), plt.show()
                 fill_image = ski.morphology.closing(ski.morphology.dilation(ski.morphology.dilation(markers)))
                 fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(df_context.DistanceToNeighbor.astype(float).values[0]))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
                 ##plt.figure(), plt.imshow(fill_image, cmap='gray'), plt.show()
@@ -167,10 +167,14 @@ for sample in list(mosaicfiles.keys())[0:1]:
                 edges = ski.filters.sobel(background_cropped)
                 markers = np.zeros_like(background_cropped)
                 markers[edges > np.quantile(edges, 0.99)] = 1
+                markers[edges > (df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].max(axis=1).values/255)] = 1
                 markers[(sp.ndimage.binary_closing(edges) == False)] = 0
 
                 # plt.figure(),plt.imshow(markers, cmap='gray'),plt.show()
                 fill_image = sp.ndimage.binary_fill_holes(markers)
+                fill_image = ski.morphology.closing(ski.morphology.dilation(ski.morphology.dilation(markers)))
+                fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(df_context.DistanceToNeighbor.astype(float).values[0]))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
+
                 # plt.figure(),plt.imshow(fill_image),plt.show()
                 label_objects_background, nb_labels_background = sp.ndimage.label(fill_image)
                 label_objects_background = ski.morphology.remove_small_objects(label_objects_background, min_size=float( df_context.MinESD.values[0]) / pixel_size)
@@ -179,7 +183,14 @@ for sample in list(mosaicfiles.keys())[0:1]:
                 label_diff=label_objects.copy()
                 label_diff[(label_objects.astype(bool).astype(int)==1)&(label_objects_background.astype(bool).astype(int)-(label_objects.astype(bool).astype(int))!=-1)]=0
                 # plt.figure(),plt.imshow(label_diff),plt.show()
-                id_to_discard=pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).values != pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).values).flatten()]+1
+                # Discard objects with same bounding box plus/minus neighbor pixels
+
+                ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_objects,shift_x=int(df_context.DistanceToNeighbor.astype(float).values[0]),shift_y=int(df_context.DistanceToNeighbor.astype(float).values[0])), properties=['slice'])
+                ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_diff, shift_x=int(df_context.DistanceToNeighbor.astype(float).values[0]), shift_y=int( df_context.DistanceToNeighbor.astype(float).values[0])), properties=['slice'])
+                if ski.measure.intersection_coeff(label_objects.astype(bool).astype(int), label_diff.astype(bool).astype(int)) < 0.80:
+                    id_to_discard=pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).slice.isin(pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).slice.unique()))==False]+1
+                else:
+                    id_to_discard=[]
                 if len(id_to_discard):
                     label_objects[np.in1d(label_objects,id_to_discard).reshape(label_objects.shape)]=0
                 # plt.figure(),plt.imshow(label_objects),plt.show()
@@ -193,11 +204,12 @@ for sample in list(mosaicfiles.keys())[0:1]:
                     largest_object = np.isin(labelled_particle, np.arange(0, len((np.bincount(labelled_particle.flat)[ 1:]))) + 1)  # labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
 
                     # Measure properties
-                    df_properties_git = pd.concat([pd.DataFrame({'Capture ID':str(particle_id).rstrip(),'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id]), pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped, properties=['area', 'area_bbox', 'area_convex', 'area_filled','axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local','centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals','intensity_mean', 'intensity_max', 'intensity_min','intensity_std', 'moments', 'moments_central', 'moments_hu', 'num_pixels', 'orientation', 'perimeter', 'slice']), index=[particle_id])], axis=1) if nb_labels > 0 else pd.DataFrame({'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id])
+
+                    df_properties_git = pd.concat([pd.DataFrame({'Capture ID':str(particle_id).rstrip(),'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id]), pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped, properties=['area', 'area_bbox', 'area_convex', 'area_filled','axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local','centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals','intensity_mean', 'intensity_max', 'intensity_min','intensity_std', 'moments', 'moments_central', 'num_pixels', 'orientation', 'perimeter', 'slice'],spacing=pixel_size), index=[particle_id])], axis=1) if nb_labels > 0 else pd.DataFrame({'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id])
                     df_properties_sample_merged = pd.concat([df_properties_sample_merged, df_properties_git],axis=0).reset_index(drop=True)
 
                     # Split the mosaic according to the slices of rectangular regions to generate thumbnail and save
-                    pixel_size = float(df_pixel.at[file.parent.name, 'Calibration_Factor'].strip(' '))  # in microns per pixel
+
                     scale_value = 50  # size of the scale bar in microns
                     padding = int((np.ceil(scale_value / pixel_size) + 10) / 2)
                     fig, axes = plt.subplots(1, 1)
@@ -219,40 +231,26 @@ for sample in list(mosaicfiles.keys())[0:1]:
 
             bar.update(n=1)
     # Merge the de-novo properties datatable with FlowCam data, re-format for EcoTaxa and save
-    df_properties=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).reset_index().astype({'Capture ID':str}).assign(Sample=sample_id),how='left',on=['Sample','Capture ID'])
-    df_properties_all=pd.concat([df_properties_all, df_properties],axis=0).reset_index(drop=True)
+    df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).reset_index().astype({'Capture ID':str}).assign(Sample=sample_id),how='left',on=['Sample','Capture ID'])
+    df_properties_all=pd.concat([df_properties_all,  df_properties_merged],axis=0).reset_index(drop=True)
     filename_ecotaxa = str(save_directory /'ecotaxa_table_{}.tsv'.format(str(sample_id).rstrip()))
-    df_ecotaxa = generate_ecotaxa_table(df=pd.merge(df_properties,df_volume.loc[sample].to_frame().T.assign(Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
+    df_ecotaxa = generate_ecotaxa_table(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
     # Generate Normalized Biovolume Size Spectra
-    df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge(df_properties,df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float))[['volume']],how='left',right_index=True,left_on=['Sample']), pixel_size=pixel_size, grouping_factor=['Sample'])
+    df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float))[['volume']],how='left',right_index=True,left_on=['Sample']), pixel_size=1, grouping_factor=['Sample']) # Set pixel size to 1 since pixel units were already converted to metric units
     df_nbss=pd.concat([df_nbss,df_nbss_sample],axis=0).reset_index(drop=True)
 
-
-## Generating Ecotaxa table
-with tqdm(desc='', total=len(list(mosaicfiles.keys())), bar_format='{desc}{bar}', position=0, leave=True) as bar:
-    for sample in list(mosaicfiles.keys()):
-        percent = np.round(100 * (bar.n / len(list(mosaicfiles.keys()))), 1)
-        bar.set_description('Generating Ecotaxa table for run {} (%s%%)'.format(sample) % percent, refresh=True)
-        path_to_data=mosaicfiles[sample][0].parent / str(sample +'.csv')
-        if path_to_data.exists():
-            df_data=pd.read_csv(path_to_data,encoding='latin-1')
-            df_ecotaxa=pd.DataFrame({'img_file_name':['[t]']+list('thumbnail_'+sample+'_'+df_data['Capture ID'].astype(str)+'.png'),
-                                     'img_rank':['[f]']+list(df_data['Group ID'].astype(float)),
-                                     'object_id':['[t]']+list('thumbnail_'+sample+'_'+df_data['Capture ID'].astype(str)),
-                                     'object_lat':['[f]']+[cfg_metadata['latitude']]*len(df_data),
-                                     'object_lon':['[f]']+[cfg_metadata['longitude']]*len(df_data),
-                                     'object_date':['[t]']+[sample.split('_')[4]]*len(df_data),
-                                     'object_time':['[t]']+[cfg_metadata['wasam_sampling_time']]*len(df_data),
-                                     'object_depth_min':['[f]']+[0]*len(df_data),
-                                     'object_depth_max': ['[f]'] + [0] * len(df_data)
-                                     })
-            filename=str(path_to_data).replace('acquisitions','ecotaxa').replace('.csv','.tsv')
-            df_ecotaxa.to_csv(filename,sep='\t')
-        else:
-            print('\nDatafiles not found.Skipping run\n')
-        bar.update(n=1)
-
-
+# Plot the Normalized Biovolume Size Spectra
+#Attention, grouping factor should be a string
+plot = (ggplot(df_nbss) +
+        #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
+        #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
+        geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
+        geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='Sample'), alpha=1)+
+        labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',colour='') +
+        scale_y_log10(breaks=10 ** np.arange(np.floor(np.log10(1e-01)) - 1, np.ceil(np.log10(1e+04)), step=1),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
+        scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
 
 
 
