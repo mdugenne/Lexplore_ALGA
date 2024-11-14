@@ -146,18 +146,19 @@ for sample in list(mosaicfiles.keys())[0:1]:
                 image_cropped = image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]
                 colored_image_cropped= colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]
                 ##plt.figure(),plt.imshow(colored_image_cropped),plt.show()
-                if background_cropped.shape!=image_cropped.shape:
+                if background_cropped.shape!=image_cropped.shape: # Background might need to be reshaped since the thumbnails appearing at the bottom of the mosaic are cropped off 30 pixels to avoid overlap with the text
                     background_cropped=background_cropped[slice(None, -1*(background_cropped.shape[0]-image_cropped.shape[0]), None)]
                 diff_image = compare_images(image_cropped,background_cropped, method='diff')
                 ##plt.figure(),plt.imshow(diff_image),plt.show()
                 edges = ski.filters.sobel(diff_image)
                 markers = np.zeros_like(diff_image)
-                markers[diff_image > (1/df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].max(axis=1).values)] = 1
+                markers[diff_image >(df_context_flowcam_micro.astype({'ThresholdDark': float, 'ThresholdLight': float})[ ['ThresholdDark', 'ThresholdLight']].max(axis=1).values / 255)] = 1
+                #markers[diff_image > (1/df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].max(axis=1).values)] = 1
                 #markers[edges > np.quantile(edges, 0.85)] = 1
                 markers[(sp.ndimage.binary_closing(edges) == False)] = 0
                 ##plt.figure(), plt.imshow(markers, cmap='gray'), plt.show()
-                fill_image = ski.morphology.closing(ski.morphology.dilation(ski.morphology.dilation(markers)))
-                fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(df_context.DistanceToNeighbor.astype(float).values[0]))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
+                fill_image = ski.morphology.erosion(ski.morphology.erosion(ski.morphology.closing(ski.morphology.dilation(markers,mode='constant'))))
+                fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(np.floor(df_context.DistanceToNeighbor.astype(float).values[0]/pixel_size/4)))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
                 ##plt.figure(), plt.imshow(fill_image, cmap='gray'), plt.show()
                 label_objects, nb_labels = sp.ndimage.label(fill_image)
                 label_objects = ski.morphology.remove_small_objects(label_objects, min_size=float( df_context.MinESD.values[0]) / pixel_size)
@@ -172,8 +173,8 @@ for sample in list(mosaicfiles.keys())[0:1]:
 
                 # plt.figure(),plt.imshow(markers, cmap='gray'),plt.show()
                 fill_image = sp.ndimage.binary_fill_holes(markers)
-                fill_image = ski.morphology.closing(ski.morphology.dilation(ski.morphology.dilation(markers)))
-                fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(df_context.DistanceToNeighbor.astype(float).values[0]))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
+                fill_image = ski.morphology.erosion(ski.morphology.erosion(ski.morphology.closing(ski.morphology.dilation(markers,mode='constant'))))
+                fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(np.floor(df_context.DistanceToNeighbor.astype(float).values[0]/pixel_size/4)))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
 
                 # plt.figure(),plt.imshow(fill_image),plt.show()
                 label_objects_background, nb_labels_background = sp.ndimage.label(fill_image)
@@ -209,12 +210,16 @@ for sample in list(mosaicfiles.keys())[0:1]:
                     df_properties_sample_merged = pd.concat([df_properties_sample_merged, df_properties_git],axis=0).reset_index(drop=True)
 
                     # Split the mosaic according to the slices of rectangular regions to generate thumbnail and save
+                    contour = ski.morphology.dilation(largest_object.astype(int), footprint=ski.morphology.square(3), out=None, shift_x=False, shift_y=False)
+                    contour -= largest_object.astype(int)
 
                     scale_value = 50  # size of the scale bar in microns
                     padding = int((np.ceil(scale_value / pixel_size) + 10) / 2)
                     fig, axes = plt.subplots(1, 1)
                     ##fig.tight_layout(pad=0, h_pad=0, w_pad=-1)
+                    #plt.imshow(np.lib.pad(contour, ((25, 25), (padding, padding)), constant_values=0), cmap='gray_r')
                     plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=float( df_metadata.at[file.parent.name, 'Background_Intensity_Mean'])), cmap='gray')
+
                     axes.set_axis_off()
                     scalebar = AnchoredSizeBar(transform=axes.transData, size=scale_value / pixel_size,
                                                label='{} $\mu$m'.format(scale_value), loc='lower center',
@@ -231,7 +236,7 @@ for sample in list(mosaicfiles.keys())[0:1]:
 
             bar.update(n=1)
     # Merge the de-novo properties datatable with FlowCam data, re-format for EcoTaxa and save
-    df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).reset_index().astype({'Capture ID':str}).assign(Sample=sample_id),how='left',on=['Sample','Capture ID'])
+    df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).rename(columns=dict(zip(df_properties_sample.columns,'Visualspreadsheet '+df_properties_sample.columns))).reset_index().astype({'Capture ID':str}).assign(Sample=sample_id),how='left',on=['Sample','Capture ID'])
     df_properties_all=pd.concat([df_properties_all,  df_properties_merged],axis=0).reset_index(drop=True)
     filename_ecotaxa = str(save_directory /'ecotaxa_table_{}.tsv'.format(str(sample_id).rstrip()))
     df_ecotaxa = generate_ecotaxa_table(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
