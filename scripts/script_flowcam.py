@@ -46,7 +46,11 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys())[0:1]:
+for sample in list(mosaicfiles.keys()):
+
+    path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
+    if path_to_ecotaxa.exists():
+        continue
     df_properties_sample_merged=pd.DataFrame()
     particle_id = 0
     df_volume =pd.concat([df_volume,df_metadata.loc[sample].to_frame().T],axis=0)
@@ -111,7 +115,7 @@ for sample in list(mosaicfiles.keys())[0:1]:
 
 
                 vignette_id=np.pad(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
-                ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)], cmap='gray'),plt.show()
+                ##plt.figure(),plt.imshow(cv2.cvtColor(colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)], cv2.COLOR_BGR2RGB)),plt.show()
                 ''' # Obsolete unless some particles got deleted in visualspreadsheet and not properly identified in the sample summary file
                 capture_id=np.pad(np.where(np.in1d(labelled,labelid_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[labelid_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
                 
@@ -152,7 +156,7 @@ for sample in list(mosaicfiles.keys())[0:1]:
                 ##plt.figure(),plt.imshow(diff_image),plt.show()
                 edges = ski.filters.sobel(diff_image)
                 markers = np.zeros_like(diff_image)
-                markers[diff_image >(df_context_flowcam_micro.astype({'ThresholdDark': float, 'ThresholdLight': float})[ ['ThresholdDark', 'ThresholdLight']].max(axis=1).values / 255)] = 1
+                markers[diff_image >(df_context_flowcam_micro.astype({'ThresholdDark': float, 'ThresholdLight': float})[ ['ThresholdDark', 'ThresholdLight']].min(axis=1).values / 255)] = 1
                 #markers[diff_image > (1/df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].max(axis=1).values)] = 1
                 #markers[edges > np.quantile(edges, 0.85)] = 1
                 markers[(sp.ndimage.binary_closing(edges) == False)] = 0
@@ -162,13 +166,15 @@ for sample in list(mosaicfiles.keys())[0:1]:
                 ##plt.figure(), plt.imshow(fill_image, cmap='gray'), plt.show()
                 label_objects, nb_labels = sp.ndimage.label(fill_image)
                 label_objects = ski.morphology.remove_small_objects(label_objects, min_size=float( df_context.MinESD.values[0]) / pixel_size)
+                label_objects, nb_labels = sp.ndimage.label(label_objects) # Needs to re-assign the label after discarding small objects
+                # plt.figure(),plt.imshow(label_objects),plt.show()
                 # plt.figure(),plt.imshow(label_objects.astype(bool).astype(int)),plt.show()
 
                 # Segmentation of the background in case flow cell was dirty
                 edges = ski.filters.sobel(background_cropped)
                 markers = np.zeros_like(background_cropped)
                 markers[edges > np.quantile(edges, 0.99)] = 1
-                markers[edges > (df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].max(axis=1).values/255)] = 1
+                markers[edges > (df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].min(axis=1).values/255)] = 1
                 markers[(sp.ndimage.binary_closing(edges) == False)] = 0
 
                 # plt.figure(),plt.imshow(markers, cmap='gray'),plt.show()
@@ -179,13 +185,14 @@ for sample in list(mosaicfiles.keys())[0:1]:
                 # plt.figure(),plt.imshow(fill_image),plt.show()
                 label_objects_background, nb_labels_background = sp.ndimage.label(fill_image)
                 label_objects_background = ski.morphology.remove_small_objects(label_objects_background, min_size=float( df_context.MinESD.values[0]) / pixel_size)
+                label_objects_background, nb_labels_background = sp.ndimage.label(label_objects_background)
                 ## plt.figure(),plt.imshow(label_objects_background.astype(bool).astype(int)),plt.show()
                 ## plt.figure(), plt.imshow( label_objects_background.astype(bool).astype(int)-(label_objects.astype(bool).astype(int))),plt.show()
                 label_diff=label_objects.copy()
                 label_diff[(label_objects.astype(bool).astype(int)==1)&(label_objects_background.astype(bool).astype(int)-(label_objects.astype(bool).astype(int))!=-1)]=0
                 # plt.figure(),plt.imshow(label_diff),plt.show()
-                # Discard objects with same bounding box plus/minus neighbor pixels
 
+                # Discard objects with same bounding box plus/minus neighbor pixels
                 ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_objects,shift_x=int(df_context.DistanceToNeighbor.astype(float).values[0]),shift_y=int(df_context.DistanceToNeighbor.astype(float).values[0])), properties=['slice'])
                 ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_diff, shift_x=int(df_context.DistanceToNeighbor.astype(float).values[0]), shift_y=int( df_context.DistanceToNeighbor.astype(float).values[0])), properties=['slice'])
                 if ski.measure.intersection_coeff(label_objects.astype(bool).astype(int), label_diff.astype(bool).astype(int)) < 0.80:
