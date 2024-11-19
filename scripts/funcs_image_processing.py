@@ -3,6 +3,10 @@
 import warnings
 warnings.filterwarnings(action='ignore')
 
+# Ecotaxa API module
+
+
+
 # Image processing modules
 import skimage as ski #pip install -U scikit-image
 from skimage import color,measure,morphology

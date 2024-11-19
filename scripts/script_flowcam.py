@@ -46,7 +46,7 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys())[9:15]:
+for sample in list(mosaicfiles.keys()):
 
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
     if path_to_ecotaxa.exists():
@@ -90,8 +90,8 @@ for sample in list(mosaicfiles.keys())[9:15]:
             # Measure region properties to look for rectangular blobs, a.k.a thumbnails
             df_properties=pd.DataFrame(ski.measure.regionprops_table(label_image=labelled,intensity_image=image,properties=['area_convex','area_bbox','axis_major_length','axis_minor_length','bbox','extent','slice']))
             # Identify and plot rectangular regions (=vignettes), except for the last two corresponding to the period in the bottom sentence displayed on the mosaic ('Property shown : Capture ID')
-
-            rect_idx=df_properties.query('(area_convex==area_bbox) & (extent==1)').index+1#df_properties.query('(area_convex==area_bbox) & (extent==1)').index[:-2]+1
+            # Extent is rounded to the 4th decimals to avoid skipping large bubbles that takes the full mosaic height
+            rect_idx=df_properties.query('(area_convex==area_bbox) & (extent.round(4)==1)').index+1#df_properties.query('(area_convex==area_bbox) & (extent==1)').index[:-2]+1
             ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,rect_idx).reshape(labelled.shape),image,0), cmap='gray'),plt.show()
             labelid_idx=((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')).sort_values(['bbox-1','bbox-0']).index)+1#((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')[:-4]).sort_values(['bbox-1','bbox-0']).index)+1 #label are sorted according to the x position
             ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,labelid_idx).reshape(labelled.shape),image,0), cmap='gray'),plt.show()
@@ -102,17 +102,18 @@ for sample in list(mosaicfiles.keys())[9:15]:
             #      Skip,[2235:2253]+[2255:2264]+[2266]
             if df_metadata.astype({'Skip':str}).loc[sample_id,'Skip']!='nan':
                 id_to_skip = sum(list(map(lambda id: list(np.arange(int(re.sub('\W+', '', id.split(':')[0])), int(re.sub('\W+', '', id.split(':')[1])) + 1)) if len( id.split(':')) == 2 else [int(re.sub('\W+', '', id))], df_metadata.loc[sample_id, 'Skip'].split(r']+['))), [])
-                if len(id_to_skip)!=(int(df_metadata.astype({'Particle_Count':float}).loc[sample_id,'Particle_Count'])-int(df_summary_statistics.loc[sample_id,'Count'])):
-                    print('\nAttention, Number of particles to skip is different than the difference between total particle count and particle count in the "Metadata statistics table".\nSkipping run {}. Please check the summary file and data file for missing particles'.format(sample_id))
+                #if len(id_to_skip)!=(int(df_metadata.astype({'Particle_Count':float}).loc[sample_id,'Particle_Count'])-int(df_summary_statistics.loc[sample_id,'Count'])):
+                    #print('\nAttention, Number of particles to skip is different than the difference between total particle count and particle count in the "Metadata statistics table".\nSkipping run {}. Please check the summary file and data file for missing particles'.format(sample_id))
                     #continue
             else:
                 id_to_skip=[]
             for id_of_interest in np.arange(0,len(rect_idx)):
                 if len(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]):
                     particle_id = particle_id + 1
+                    ''' Deprecated: From now on, the ID to be skipped are still part of the mosaic files to limit the number of manual steps and save time
                     while (particle_id in id_to_skip) : # If the particle was manually filtered out, skip the current id and proceed to the next one
                         particle_id = particle_id + 1
-
+                    '''
 
 
                     vignette_id=np.pad(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
@@ -213,35 +214,37 @@ for sample in list(mosaicfiles.keys())[9:15]:
                         ##plt.figure(), plt.imshow(largest_object, cmap='gray_r'), plt.show()
                         largest_object = np.isin(labelled_particle, np.arange(0, len((np.bincount(labelled_particle.flat)[ 1:]))) + 1)  # labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
 
-                        # Measure properties
+                        # Check if particle ID should be skipped
+                        if particle_id not in id_to_skip:
+                            # Measure properties
 
-                        df_properties_git = pd.concat([pd.DataFrame({'Capture ID':str(particle_id).rstrip(),'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id]), pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped, properties=['area', 'area_bbox', 'area_convex', 'area_filled','axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local','centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals','intensity_mean', 'intensity_max', 'intensity_min','intensity_std', 'moments', 'moments_central', 'num_pixels', 'orientation', 'perimeter', 'slice'],spacing=pixel_size), index=[particle_id])], axis=1) if nb_labels > 0 else pd.DataFrame({'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id])
-                        df_properties_sample_merged = pd.concat([df_properties_sample_merged, df_properties_git],axis=0).reset_index(drop=True)
+                            df_properties_git = pd.concat([pd.DataFrame({'Capture ID':str(particle_id).rstrip(),'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id]), pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped, properties=['area', 'area_bbox', 'area_convex', 'area_filled','axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local','centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals','intensity_mean', 'intensity_max', 'intensity_min','intensity_std', 'moments', 'moments_central', 'num_pixels', 'orientation', 'perimeter', 'slice'],spacing=pixel_size), index=[particle_id])], axis=1) if nb_labels > 0 else pd.DataFrame({'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id])
+                            df_properties_sample_merged = pd.concat([df_properties_sample_merged, df_properties_git],axis=0).reset_index(drop=True)
 
-                        # Split the mosaic according to the slices of rectangular regions to generate thumbnail and save
-                        contour = ski.morphology.dilation(largest_object.astype(int), footprint=ski.morphology.square(3), out=None, shift_x=False, shift_y=False)
-                        contour -= largest_object.astype(int)
+                            # Split the mosaic according to the slices of rectangular regions to generate thumbnail and save
+                            contour = ski.morphology.dilation(largest_object.astype(int), footprint=ski.morphology.square(3), out=None, shift_x=False, shift_y=False)
+                            contour -= largest_object.astype(int)
 
-                        scale_value = 50  # size of the scale bar in microns
-                        padding = int((np.ceil(scale_value / pixel_size) + 10) / 2)
-                        fig, axes = plt.subplots(1, 1)
-                        ##fig.tight_layout(pad=0, h_pad=0, w_pad=-1)
-                        #plt.imshow(np.lib.pad(contour, ((25, 25), (padding, padding)), constant_values=0), cmap='gray_r')
-                        plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=float( df_metadata.at[file.parent.name, 'Background_Intensity_Mean'])), cmap='gray')
+                            scale_value = 50  # size of the scale bar in microns
+                            padding = int((np.ceil(scale_value / pixel_size) + 10) / 2)
+                            fig, axes = plt.subplots(1, 1)
+                            ##fig.tight_layout(pad=0, h_pad=0, w_pad=-1)
+                            #plt.imshow(np.lib.pad(contour, ((25, 25), (padding, padding)), constant_values=0), cmap='gray_r')
+                            plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=float( df_metadata.at[file.parent.name, 'Background_Intensity_Mean'])), cmap='gray')
 
-                        axes.set_axis_off()
-                        scalebar = AnchoredSizeBar(transform=axes.transData, size=scale_value / pixel_size,
-                                                   label='{} $\mu$m'.format(scale_value), loc='lower center',
-                                                   pad=0.1,
-                                                   color='white',
-                                                   frameon=False,
-                                                   fontproperties=fontprops)
-                        axes.add_artist(scalebar)
-                        # axes.set_title('Particle ID: {}'.format(str(particle_id)))
-                        save_directory = Path(str(file.parent).replace('acquisitions', 'ecotaxa')).expanduser()
-                        save_directory.mkdir(parents=True, exist_ok=True)
-                        fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip())),  bbox_inches="tight")
-                        plt.close('all')
+                            axes.set_axis_off()
+                            scalebar = AnchoredSizeBar(transform=axes.transData, size=scale_value / pixel_size,
+                                                       label='{} $\mu$m'.format(scale_value), loc='lower center',
+                                                       pad=0.1,
+                                                       color='white',
+                                                       frameon=False,
+                                                       fontproperties=fontprops)
+                            axes.add_artist(scalebar)
+                            # axes.set_title('Particle ID: {}'.format(str(particle_id)))
+                            save_directory = Path(str(file.parent).replace('acquisitions', 'ecotaxa')).expanduser()
+                            save_directory.mkdir(parents=True, exist_ok=True)
+                            fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip())),  bbox_inches="tight")
+                            plt.close('all')
 
             bar.update(n=1)
     # Merge the de-novo properties datatable with FlowCam data, re-format for EcoTaxa and save
