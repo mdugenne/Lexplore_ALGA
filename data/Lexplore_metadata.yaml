@@ -1,6 +1,7 @@
 # This file contains the set of metadata that gets automatically appended to FlowCam and CytoSense datafiles for upload on EcoTaxa
 program : 'LeXPLORE' #Name of the research program
 project : 'ALGA' #Name of the research project
+local_network : 'R' # The letter or url assigned to the local network where datafiles are stored and processed
 latitude : 46.5002275 #Sampling latitude, decimal degrees
 longitude : 6.6608352777777778 #Sampling longitude, decimal degrees
 principal_investigator : 'Bastiaan Ibelings'
