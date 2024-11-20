@@ -218,7 +218,7 @@ for sample in list(mosaicfiles.keys()):
                         if particle_id not in id_to_skip:
                             # Measure properties
 
-                            df_properties_git = pd.concat([pd.DataFrame({'Capture ID':str(particle_id).rstrip(),'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id]), pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped, properties=['area', 'area_bbox', 'area_convex', 'area_filled','axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local','centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals','intensity_mean', 'intensity_max', 'intensity_min','intensity_std', 'moments', 'moments_central', 'num_pixels', 'orientation', 'perimeter', 'slice'],spacing=pixel_size), index=[particle_id])], axis=1) if nb_labels > 0 else pd.DataFrame({'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id])
+                            df_properties_git = pd.concat([pd.DataFrame({'Capture ID':str(particle_id).rstrip(),'img_file_name': 'thumbnail_{}_{}.jpg'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id]), pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped, properties=['area', 'area_bbox', 'area_convex', 'area_filled','axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local','centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals','intensity_mean', 'intensity_max', 'intensity_min','intensity_std', 'moments', 'moments_central', 'num_pixels', 'orientation', 'perimeter', 'slice'],spacing=pixel_size), index=[particle_id])], axis=1) if nb_labels > 0 else pd.DataFrame({'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id])
                             df_properties_sample_merged = pd.concat([df_properties_sample_merged, df_properties_git],axis=0).reset_index(drop=True)
 
                             # Split the mosaic according to the slices of rectangular regions to generate thumbnail and save
@@ -243,15 +243,18 @@ for sample in list(mosaicfiles.keys()):
                             # axes.set_title('Particle ID: {}'.format(str(particle_id)))
                             save_directory = Path(str(file.parent).replace('acquisitions', 'ecotaxa')).expanduser()
                             save_directory.mkdir(parents=True, exist_ok=True)
-                            fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip())),  bbox_inches="tight")
+                            fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.jpg'.format(str(sample_id).rstrip(), str(particle_id).rstrip())),transparent=False,  bbox_inches="tight",pad_inches=0,dpi=300)
                             plt.close('all')
 
             bar.update(n=1)
     # Merge the de-novo properties datatable with FlowCam data, re-format for EcoTaxa and save
     df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).rename(columns=dict(zip(df_properties_sample.columns,'Visualspreadsheet '+df_properties_sample.columns))).reset_index().astype({'Capture ID':str}).assign(Sample=sample_id),how='left',on=['Sample','Capture ID'])
     df_properties_all=pd.concat([df_properties_all,  df_properties_merged],axis=0).reset_index(drop=True)
-    filename_ecotaxa = str(save_directory /'ecotaxa_table_{}.tsv'.format(str(sample_id).rstrip()))
+    filename_ecotaxa = str(save_directory.parent / save_directory.stem.rstrip().replace(' ','_') /'ecotaxa_table_{}.tsv'.format(str(sample_id).rstrip().replace(' ','_')))
     df_ecotaxa = generate_ecotaxa_table(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
+
+    # Compress folder to prepare upload on Ecotaxa
+    shutil.make_archive(str(save_directory)+'.zip','zip',save_directory,base_dir=None)
     # Generate Normalized Biovolume Size Spectra
     df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float))[['volume']],how='left',right_index=True,left_on=['Sample']), pixel_size=1, grouping_factor=['Sample']) # Set pixel size to 1 since pixel units were already converted to metric units
     df_nbss=pd.concat([df_nbss,df_nbss_sample],axis=0).reset_index(drop=True)

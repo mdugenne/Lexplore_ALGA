@@ -139,7 +139,7 @@ for sample in list(imagefiles.keys()):
 
             # Measure properties, save to EcoTaxa format, and append to existing samples
             particle_id=file.name.split('_')[-1].split('.')[0]
-            df_properties_sample=pd.concat([pd.DataFrame({'img_file_name':'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id]),pd.DataFrame(ski.measure.regionprops_table(label_image=largest_object.astype(int),intensity_image=image,properties=['area','area_bbox','area_convex','area_filled','axis_major_length','axis_minor_length','axis_major_length','bbox','centroid_local','centroid_weighted_local','eccentricity','equivalent_diameter_area','extent','image_intensity','inertia_tensor','inertia_tensor_eigvals','intensity_mean','intensity_max','intensity_min','intensity_std','moments','moments_central','num_pixels','orientation','perimeter','slice'],spacing=pixel_size),index=[particle_id])],axis=1) if nb_labels>0 else pd.DataFrame({'img_file_name':'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id])
+            df_properties_sample=pd.concat([pd.DataFrame({'img_file_name':'thumbnail_{}_{}.jpg'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id]),pd.DataFrame(ski.measure.regionprops_table(label_image=largest_object.astype(int),intensity_image=image,properties=['area','area_bbox','area_convex','area_filled','axis_major_length','axis_minor_length','axis_major_length','bbox','centroid_local','centroid_weighted_local','eccentricity','equivalent_diameter_area','extent','image_intensity','inertia_tensor','inertia_tensor_eigvals','intensity_mean','intensity_max','intensity_min','intensity_std','moments','moments_central','num_pixels','orientation','perimeter','slice'],spacing=pixel_size),index=[particle_id])],axis=1) if nb_labels>0 else pd.DataFrame({'img_file_name':'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip()),'Sample':sample,'nb_particles':nb_labels},index=[particle_id])
             df_properties=pd.concat([df_properties, df_properties_sample],axis=0).reset_index(drop=True)
 
             # Generate and save thumbnails for EcoTaxa
@@ -161,7 +161,7 @@ for sample in list(imagefiles.keys()):
             #thumbnail.show()
             save_directory = Path(str(file.parent.parent).replace('export files{}IIF'.format(os.sep), 'ecotaxa').replace('Export_','').replace(' ','_')).expanduser()
             save_directory.mkdir(parents=True, exist_ok=True)
-            thumbnail.savefig(fname=str( save_directory / 'thumbnail_{}_{}.png'.format(str(sample).rstrip(), str(particle_id).rstrip())),bbox_inches="tight")
+            thumbnail.savefig(fname=str( save_directory / 'thumbnail_{}_{}.jpg'.format(str(sample).rstrip(), str(particle_id).rstrip())),bbox_inches="tight",dpi=300,pad_inches=0)
             plt.close()
             bar.update(n=1)
         # Generate abd save table for EcoTaxa
