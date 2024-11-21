@@ -46,7 +46,7 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys())[-6:]:
+for sample in list(mosaicfiles.keys()):
 
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
     if path_to_ecotaxa.exists():

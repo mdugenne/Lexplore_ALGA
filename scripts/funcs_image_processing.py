@@ -111,12 +111,12 @@ def upload_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_pa
             api_instance_jobs = ecotaxa_py_client.JobsApi(api_client)
             api_instance = ecotaxa_py_client.ProjectsApi(api_client)
             with tqdm( desc='Working on project update (https://ecotaxa.obs-vlfr.fr/prj/{})'.format(str(project_id)),total=len(datafiles), bar_format='{desc}{bar}', position=0, leave=True) as bar:
-                for file in datafiles[1:3]:
+                for file in datafiles:
 
                     try:
                         # Step 2:Upload zip file to create import task request
                         api_response_file = api_instance_files.post_user_file(file=str(file),  tag='datafiles_project_{}'.format(project_id))
-                        import_project_req = ImportReq(source_path=api_response_file, taxo_mappings=None,skip_loaded_files=True, skip_existing_objects=True, update_mode='Yes')
+                        import_project_req = ImportReq(source_path=api_response_file, taxo_mappings=None,skip_loaded_files=False, skip_existing_objects=True)
                         # Step 3: Creating a task (job) to upload the zip file adn append the data to the existing project
                         api_response = api_instance.import_file(project_id, import_req=import_project_req)
                         job_id = api_response.job_id
@@ -338,7 +338,7 @@ def generate_ecotaxa_table(df,instrument,path_to_storage=None):
     if instrument.lower()=='cytosense':
         df_ecotaxa_object=pd.concat([pd.DataFrame(
             {'img_file_name': ['[t]'] + list(df.img_file_name.values),
-             'object_id': ['[t]'] + list(df.img_file_name.astype(str).str.replace('.jpg','').values),
+             'object_id': ['[t]'] + list(df.img_file_name.astype(str)), # Attention: The object_id needs to include the file extension
              'object_lat': ['[f]'] + [cfg_metadata['latitude']] * len(df),
              'object_lon': ['[f]'] + [cfg_metadata['longitude']] * len(df),
              'object_date': ['[t]'] + [df.Sample.astype(str).values[0].split('_')[-2].replace('-','')] * len(df),
@@ -354,7 +354,7 @@ def generate_ecotaxa_table(df,instrument,path_to_storage=None):
     elif instrument.lower()=='flowcam':
         df_ecotaxa_object=pd.concat([pd.DataFrame(
             {'img_file_name': ['[t]'] + list(df.img_file_name.values),
-             'object_id': ['[t]'] + list(df.img_file_name.astype(str).str.replace('.jpg','').values),
+             'object_id': ['[t]'] + list(df.img_file_name.astype(str)), # Attention: The object_id needs to include the file extension
              'object_lat': ['[f]'] + [cfg_metadata['latitude']] * len(df),
              'object_lon': ['[f]'] + [cfg_metadata['longitude']] * len(df),
              'object_date': ['[t]'] + [df.Sample.astype(str).values[0].split('_')[5].replace('-','')] * len(df),
