@@ -27,19 +27,29 @@ df_filter_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',e
 df_summary_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).reset_index(drop=True),df:=df[df.query('Name.str.contains(r"\=",case=True)').index[0]:].reset_index(drop=True) ,df_summary_statistics:=pd.DataFrame([(df.query('Name.str.contains(r"\=",case=True)').index).tolist(),((df.query('Name.str.contains(r"\=",case=True)').index)[1:]-1).tolist()+[len(df)]]).T.apply(lambda id:{df.loc[id[0],'Name'].split(' ')[1]:pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),df.loc[id[0]+1:id[1],'Value'].values.tolist()[1].split(','))),index=[file.parent.name]) if len(df.loc[id[0]+1:id[1],'Value'].values.tolist())>1 else pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),[np.nan]*len(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(',')))),index=[file.parent.name])},axis=1,result_type='reduce'),final_df:=list(df_summary_statistics[[id for id,key in df_summary_statistics.items() if 'Metadata' in key.keys()][0]].values())[0] if len([id for id,key in df_summary_statistics.items() if 'Metadata' in key.keys()]) else pd.DataFrame({},index=[file.parent.name]))[-1],metadatafiles),axis=0)
 
 # Filter first runs
+df_summary_statistics.index
 df_summary_statistics=df_summary_statistics.drop(index=['Flowcam_10x_lexplore_wasam_20240920_2024-09-27 03-50-05', 'Flowcam_10x_lexplore_wasam_20241002_2024-10-03 07-23-04'])
-pattern_to_keep='Flowcam_10x_lexplore_wasam_20241101'
+pattern_to_keep='Flowcam_10x_lexplore_wasam_20241102'
 df_summary_statistics=df_summary_statistics.drop(index=[sample for sample in df_summary_statistics.index if pattern_to_keep not in sample])
 
 # Plot abundance
 df_summary_statistics['Analysis_time']=pd.to_datetime(np.where(df_summary_statistics['Start Time'].str.len()>0,pd.to_datetime(df_summary_statistics['Start Time'].str[0:19],format='%Y-%m-%dT%H:%M:%S'),pd.NaT))
 df_summary_statistics['Analysis_time']=df_summary_statistics.Analysis_time.dt.floor('1d') # Round acquisition time to days
-df_summary_statistics['Treatment']=pd.Categorical(pd.Series(list(df_summary_statistics.index.astype(str))).str[47:].replace('nofixative','No fixative').replace('glut','0.25% glutaraldehyde').replace('pluronic_glut','pluronic + glutaraldehyde'))
+df_summary_statistics['Treatment']=pd.Categorical(pd.Series(list(df_summary_statistics.index.astype(str))).str[47:].str.replace('_replicate1','').str.replace('_replicate2','').str.replace('nofixative','No fixative').str.replace('glut','0.25% glutaraldehyde').str.replace('pluronic_glut','pluronic + glutaraldehyde'))
 df_summary_statistics['Timepoint']=pd.Categorical('T'+((df_summary_statistics['Analysis_time']-df_summary_statistics.Analysis_time.min()).dt.days.astype(int).astype(str)),categories='T'+((df_summary_statistics['Analysis_time']-df_summary_statistics.Analysis_time.min()).dt.days.astype(int).astype(str)).unique(),ordered=True)#pd.Categorical('T'+(df_summary_statistics['Analysis_time']-df_summary_statistics.loc['Flowcam_10x_lexplore_wasam_20241002_2024-10-04_nofixative','Analysis_time']).dt.days.astype(int).astype(str),categories=['T0','T2','T4','T6','T9','T11'],ordered=True)
 # Correct the abundance in summary statistics in case any ID to skip were found
 df_summary_statistics=pd.merge(df_summary_statistics,df_metadata[['Fluid_Volume_Imaged','Skip','len_id_to_skip']],how='left',right_index=True,left_index=True)
 df_summary_statistics['Abundance_uncorrected']=df_summary_statistics.Count.astype(float)/df_summary_statistics.Fluid_Volume_Imaged.astype(str).str[0:6].astype(float)#df_summary_statistics['Particles / ml'].astype(float)
 df_summary_statistics['Abundance']=(df_summary_statistics.Count.astype(float)-df_summary_statistics.len_id_to_skip)/df_summary_statistics.Fluid_Volume_Imaged.astype(str).str[0:6].astype(float)
+
+plot = (ggplot(df_summary_statistics) +
+        stat_summary(mapping=aes(x='Timepoint', y='Abundance', group='Treatment',fill='Treatment'),color='black', alpha=1,geom='bar', position = 'dodge') + #
+        stat_summary(mapping=aes(x='Timepoint', y='Abundance', group='Treatment',fill='Treatment'), width=0,position=position_dodge(.9), alpha=1,geom='errorbar') +
+        labs(x='Timepoint',y='Particles mL$^{-1}$', title='',colour='') +
+         scale_y_continuous() +scale_fill_manual(values={'No fixative':'grey','0.25% glutaraldehyde':'black','fresh':'#ffffff00','pluronic':'black','pluronic + glutaraldehyde':'grey'})+
+        theme_paper).draw(show=False)
+plot.savefig(fname='{}/figures/Initial_test/flowcam_test_fixative_withpluronic.svg'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
+
 df_summary_statistics['Abundance_min']=poisson.interval(0.95,mu=df_summary_statistics['Abundance'].astype(int))[0]
 df_summary_statistics['Abundance_max']=poisson.interval(0.95,mu=df_summary_statistics['Abundance'].astype(int))[1]
 

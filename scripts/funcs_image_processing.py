@@ -3,6 +3,52 @@
 import warnings
 warnings.filterwarnings(action='ignore')
 
+# Image processing modules
+import skimage as ski #pip install -U scikit-image
+from skimage import color,measure,morphology
+from PIL import Image
+from skimage.util import compare_images,crop
+from skimage.color import rgb2gray
+from skimage.measure import regionprops
+import cv2
+
+
+# Data processing modules
+import numpy as np
+import pandas as pd
+from natsort import natsorted
+from tqdm import tqdm
+from functools import reduce
+
+# Plot modules
+import matplotlib
+matplotlib.use('Qt5Agg')
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+import matplotlib.font_manager as fm
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+fontprops = fm.FontProperties(size=14,family='serif')
+import copy
+my_cmap = copy.copy(plt.colormaps.get_cmap('gray_r')) # get a copy of the gray color map
+my_cmap.set_bad(alpha=0) # set how the colormap handles 'bad' values
+import latex
+
+from plotnine import *
+import plotnine
+import matplotlib
+from plotnine import geom_errorbar, coord_fixed, scale_fill_distiller
+from plotnine.themes.themeable import legend_position
+
+theme_paper=theme(panel_grid=element_blank(), legend_position='bottom',
+              panel_background=element_rect(fill='#ffffff'), legend_background=element_rect(fill='#ffffff'),
+              strip_background=element_rect(fill='#ffffff'),
+              panel_border=element_rect(color='#222222'),
+              legend_title=element_text(family='Times New Roman', size=12),
+              legend_text=element_text(family='Times New Roman', size=12),
+              axis_title=element_text(family='Times New Roman', size=12, linespacing=1),
+              axis_text_x=element_text(family='Times New Roman', size=12, linespacing=0),
+              axis_text_y=element_text(family='Times New Roman', size=12, rotation=90, linespacing=1),
+              plot_background=element_rect(fill='#ffffff00'))
 
 # Path and File processing modules
 import os
@@ -31,6 +77,7 @@ from ecotaxa_py_client.models.create_project_req import CreateProjectReq
 from ecotaxa_py_client.models.min_user_model import MinUserModel
 from ecotaxa_py_client.models.project_model import ProjectModel
 from ecotaxa_py_client.models.import_req import ImportReq
+from ecotaxa_py_client.models.taxon_model import TaxonModel
 
 ## Step 1: Create an API instance based on authentication infos.
 with ecotaxa_py_client.ApiClient() as client:
@@ -61,17 +108,34 @@ def create_ecotaxa_project(ecotaxa_configuration=configuration,project_config={'
         api_instance = ecotaxa_py_client.ProjectsApi(api_client)
         create_project_req = ecotaxa_py_client.CreateProjectReq(clone_of_id=id_to_clone,title=title,instrument=instrument,visible=True)  # CreateProjectReq |
         api_instance_users = ecotaxa_py_client.UsersApi(api_client)
-
+        api_instance_taxo = ecotaxa_py_client.TaxonomyTreeApi(api_client)
         api_response_user = list(map(lambda user: api_instance_users.search_user(by_name=user)[-1],project_config['managers']))
         try:
             # Step 1:Create a new Project
             api_response = api_instance.create_project(create_project_req)
             project_id=api_response
             # Step 2: Create a project model based on existing project (for taxonomy)
-            project_model_clone = api_instance.project_query(project_id=id_to_clone, for_managing=False)
+            if id_to_clone!=None:
+                project_model_clone = api_instance.project_query(project_id=id_to_clone, for_managing=False)
+                initial_classification_list = project_model_clone.init_classif_list
+                if 'ecotaxa_initial_classification_id' not in cfg_metadata.keys():
+                    request=input('Creating an Ecotaxa project from scratch results in empty taxonomy selection.\nYou may add categories of interest at a later stage or look for existing categories that would match your IDs.\nType 1 to continue without an initial selection or 2 to attempt finding a match up based on known categories and press enter')
+                    if request==2:
+                        request_file = input('Attempting to find existing categories on Ecotaxa using local file data/ ecotaxa_initial_classification_template.txt as a template.\nPlease edit as needed with your categories of interest, re-save the file as ecotaxa_initial_classification.txt (very important) and press enter when ready')
+                        categories=pd.read_table(path_to_git / 'data' / 'ecotaxa_initial_classification.txt',engine='python',encoding='utf-8')
+                        api_response_taxo=list(map(lambda taxon: api_instance_taxo.search_taxa(query=taxon)[0].id,categories.category))
+                    else:
+                        initial_classification_list=[]
+            elif 'ecotaxa_initial_classification_id' in cfg_metadata.keys():
+
+
+            else:
+                print('Creating an Ecotaxa project empty taxonomy selection\nYou may add categories of interest through the app')
+                initial_classification_list = []
+
 
             # Step 3 : Update the project with the remaining infos
-            project_model = ProjectModel(projid=project_id,title=title,instrument=instrument, managers=api_response_user,init_classif_list=project_model_clone.init_classif_list,
+            project_model = ProjectModel(projid=project_id,title=title,instrument=instrument, managers=api_response_user,init_classif_list=,
                                          obj_free_cols={}, sample_free_cols={}, acquisition_free_cols={},
                                          process_free_cols={}, annotators=[], viewers=[],
                                          bodc_variables={'individual_volume': None, 'subsample_coef': None,'total_water_volume': None},
@@ -146,52 +210,7 @@ def upload_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_pa
         return project_id  # ID of the newly updated project
 
 
-# Image processing modules
-import skimage as ski #pip install -U scikit-image
-from skimage import color,measure,morphology
-from PIL import Image
-from skimage.util import compare_images,crop
-from skimage.color import rgb2gray
-from skimage.measure import regionprops
-import cv2
 
-
-# Data processing modules
-import numpy as np
-import pandas as pd
-from natsort import natsorted
-from tqdm import tqdm
-from functools import reduce
-
-# Plot modules
-import matplotlib
-matplotlib.use('Qt5Agg')
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-import matplotlib.font_manager as fm
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-fontprops = fm.FontProperties(size=14,family='serif')
-import copy
-my_cmap = copy.copy(plt.colormaps.get_cmap('gray_r')) # get a copy of the gray color map
-my_cmap.set_bad(alpha=0) # set how the colormap handles 'bad' values
-import latex
-
-from plotnine import *
-import plotnine
-import matplotlib
-from plotnine import geom_errorbar, coord_fixed, scale_fill_distiller
-from plotnine.themes.themeable import legend_position
-
-theme_paper=theme(panel_grid=element_blank(), legend_position='bottom',
-              panel_background=element_rect(fill='#ffffff'), legend_background=element_rect(fill='#ffffff'),
-              strip_background=element_rect(fill='#ffffff'),
-              panel_border=element_rect(color='#222222'),
-              legend_title=element_text(family='Times New Roman', size=12),
-              legend_text=element_text(family='Times New Roman', size=12),
-              axis_title=element_text(family='Times New Roman', size=12, linespacing=1),
-              axis_text_x=element_text(family='Times New Roman', size=12, linespacing=0),
-              axis_text_y=element_text(family='Times New Roman', size=12, rotation=90, linespacing=1),
-              plot_background=element_rect(fill='#ffffff00'))
 import seaborn as sns
 summary_metadata_columns=['Mode', 'Priming_Method', 'Flow_Rate', 'Recalibrations', 'Stop_Reason',
        'Sample_Volume_Aspirated', 'Sample_Volume_Processed',
