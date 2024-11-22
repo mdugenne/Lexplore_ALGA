@@ -60,6 +60,7 @@ import yaml #conda install PyYAML
 path_to_config = path_to_git / 'data' / 'Lexplore_metadata.yaml'
 with open(path_to_config, 'r') as config_file:
     cfg_metadata = yaml.safe_load(config_file)
+cfg_metadata['ecotaxa_initial_classification_id']=eval(cfg_metadata['ecotaxa_initial_classification_id'])
 import shutil # zip folder
 import re
 import time
@@ -119,15 +120,20 @@ def create_ecotaxa_project(ecotaxa_configuration=configuration,project_config={'
                 project_model_clone = api_instance.project_query(project_id=id_to_clone, for_managing=False)
                 initial_classification_list = project_model_clone.init_classif_list
                 if 'ecotaxa_initial_classification_id' not in cfg_metadata.keys():
+                    with open(path_to_config, 'w') as config_file:
+                        cfg_metadata.update({'ecotaxa_initial_classification_id':str(initial_classification_list)})
+                        yaml.dump(cfg_metadata,config_file, default_flow_style=False)
+
                     request=input('Creating an Ecotaxa project from scratch results in empty taxonomy selection.\nYou may add categories of interest at a later stage or look for existing categories that would match your IDs.\nType 1 to continue without an initial selection or 2 to attempt finding a match up based on known categories and press enter')
                     if request==2:
-                        request_file = input('Attempting to find existing categories on Ecotaxa using local file data/ ecotaxa_initial_classification_template.txt as a template.\nPlease edit as needed with your categories of interest, re-save the file as ecotaxa_initial_classification.txt (very important) and press enter when ready')
+                        request_file = input('Attempting to find existing categories on Ecotaxa using local file data/ ecotaxa_initial_classification_template.txt as a template.\nPlease edit as needed with your categories of interest, re-save the file as ecotaxa_initial_classification.txt (very important) and press enter when ready.\nCheck existing categories at: {}'.format('https://ecotaxoserver.obs-vlfr.fr/browsetaxo/'))
                         categories=pd.read_table(path_to_git / 'data' / 'ecotaxa_initial_classification.txt',engine='python',encoding='utf-8')
-                        api_response_taxo=list(map(lambda taxon: api_instance_taxo.search_taxa(query=taxon)[0].id,categories.category))
+                        initial_classification_list=dict(map(lambda taxon: (api_instance_taxo.search_taxa(query=taxon)[0].text,api_instance_taxo.search_taxa(query=taxon)[0].id),categories.category))
+                        initial_classification_list=list(initial_classification_list.values())
                     else:
                         initial_classification_list=[]
             elif 'ecotaxa_initial_classification_id' in cfg_metadata.keys():
-
+                initial_classification_list=cfg_metadata['ecotaxa_initial_classification_id']
 
             else:
                 print('Creating an Ecotaxa project empty taxonomy selection\nYou may add categories of interest through the app')
@@ -135,7 +141,7 @@ def create_ecotaxa_project(ecotaxa_configuration=configuration,project_config={'
 
 
             # Step 3 : Update the project with the remaining infos
-            project_model = ProjectModel(projid=project_id,title=title,instrument=instrument, managers=api_response_user,init_classif_list=,
+            project_model = ProjectModel(projid=project_id,title=title,instrument=instrument, managers=api_response_user,init_classif_list=initial_classification_list,
                                          obj_free_cols={}, sample_free_cols={}, acquisition_free_cols={},
                                          process_free_cols={}, annotators=[], viewers=[],
                                          bodc_variables={'individual_volume': None, 'subsample_coef': None,'total_water_volume': None},

@@ -21,6 +21,7 @@ pytesseract.pytesseract.tesseract_cmd = r'{}\AppData\Local\Programs\Tesseract-OC
 path_to_network=Path("{}:".format(cfg_metadata['local_path_storage'])) # Set working directory to forel-meco
 # Load metadata files (volume imaged, background pixel intensity, etc.) and save entries into separate tables (metadata and statistics)
 metadatafiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_10x_lexplore*/*_summary.csv'))
+metadatafiles=list(filter(lambda element: element.parent.parent.stem not in ['Tests','Blanks'],metadatafiles)) # Discard test and blank acquisitions
 df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name.replace(' ','_')})),df:=df[[col for col in df.columns if col in summary_metadata_columns]])[-1],metadatafiles),axis=0)
 #Check the fluid volume imaged calculation based on the number of frames used.
 df_metadata.Used.astype(float)/df_metadata.Fluid_Volume_Imaged.str.split(' ').str[0].astype(float)

@@ -1,20 +1,25 @@
-# This file contains the set of metadata that gets automatically appended to FlowCam and CytoSense datafiles for upload on EcoTaxa
-program : 'LeXPLORE' #Name of the research program
-project : 'ALGA' #Name of the research project
-local_network : 'R' # The letter or url assigned to the local network where datafiles are stored and processed
-latitude : 46.5002275 #Sampling latitude, decimal degrees
-longitude : 6.6608352777777778 #Sampling longitude, decimal degrees
-principal_investigator : 'Bastiaan Ibelings'
-instrument_operator : 'Irene Muscas / Mathilde Dugenne'
-wasam_sampling_time : '090000' #hhmmss
-wasam_sampling_depth : 3.7 #meters
-local_path_storage : 'R' #Name of the local network/directory where data/exportfiles are stored
-flowcam_10x_context_file : 'R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_10x_lexplore.ctx' # Local path to context file for the FlowCam 10x acquisitions
-flowcam_macro_context_file : 'R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_2mm_lexplore.ctx' # Local path to context file for the FlowCam macro acquisitions
-pixel_size_cytosense : 0.67 #Cytosense camera resolution in micrometer per pixel
-pixel_size_flowcam_10x : 0.7339 #FlowCam objective 10x resolution in micrometer per pixel
-pixel_size_flowcam_macro : 9.47 #FlowCam macro resolution in micrometer per pixel
-width_cytosense : 1280 #width of the Cytosense camera frame in pixels
-height_cytosense : 1024 #width of the Cytosense camera frame in pixels
-fps_cytosense : 26.89 #Frequency of Cytosense image acquisition in frames per second
-version_cytoUSB : 'v6.3.3.0'
+ecotaxa_initial_classification_id: '[28213, 92242, 94125, 28208, 28290, 56041, 17519,
+  3, 18806, 85708, 15168, 15413, 15161, 11358, 11813, 17574, 12487, 94778, 376, 233,
+  1680, 28253, 28189, 15400, 17572, 11921, 15151, 2, 28176, 31777, 16264, 17605, 28288,
+  15378, 95494, 12474, 28152, 15370, 15230, 31845, 15119, 11621, 95495, 11617, 15268,
+  12360, 12466, 12461, 28222, 11340, 28110, 17562, 11360, 85008, 85061, 85060, 84963,
+  85026, 93675, 1, 84960, 85023]'
+flowcam_10x_context_file: R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_10x_lexplore.ctx
+flowcam_macro_context_file: R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_2mm_lexplore.ctx
+fps_cytosense: 26.89
+height_cytosense: 1024
+instrument_operator: Irene Muscas / Mathilde Dugenne
+latitude: 46.5002275
+local_network: R
+local_path_storage: R
+longitude: 6.660835277777778
+pixel_size_cytosense: 0.67
+pixel_size_flowcam_10x: 0.7339
+pixel_size_flowcam_macro: 9.47
+principal_investigator: Bastiaan Ibelings
+program: LeXPLORE
+project: ALGA
+version_cytoUSB: v6.3.3.0
+wasam_sampling_depth: 3.7
+wasam_sampling_time: 090000
+width_cytosense: 1280

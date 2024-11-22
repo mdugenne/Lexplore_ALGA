@@ -16,6 +16,7 @@ except:
 path_to_network=Path("R:") # Set working directory to forel-meco
 # Load metadata files (volume imaged, background pixel intensity, etc.) and save entries into separate tables (metadata and statistics)
 metadatafiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_10x_lexplore*/*_summary.csv'))
+metadatafiles=list(filter(lambda element: element.parent.parent.stem not in ['Tests','Blanks'],metadatafiles))
 df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',quotechar=r'\"',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name})),df:=df[[col for col in df.columns if col in summary_metadata_columns]])[-1],metadatafiles),axis=0)
 df_metadata['len_id_to_skip']=df_metadata.Skip.astype(str).apply(lambda ids: len(sum(list(map(lambda id: list(np.arange(int(re.sub('\W+', '', id.rsplit(':')[0])), int(re.sub('\W+', '', id.rsplit(':')[1])) + 1)) if len( id.rsplit(':')) == 2 else [int(re.sub('\W+', '', id))],ids.rsplit(r"]+["))), [])) if not ids=='nan' else 0)
 
@@ -35,7 +36,7 @@ df_summary_statistics=df_summary_statistics.drop(index=[sample for sample in df_
 # Plot abundance
 df_summary_statistics['Analysis_time']=pd.to_datetime(np.where(df_summary_statistics['Start Time'].str.len()>0,pd.to_datetime(df_summary_statistics['Start Time'].str[0:19],format='%Y-%m-%dT%H:%M:%S'),pd.NaT))
 df_summary_statistics['Analysis_time']=df_summary_statistics.Analysis_time.dt.floor('1d') # Round acquisition time to days
-df_summary_statistics['Treatment']=pd.Categorical(pd.Series(list(df_summary_statistics.index.astype(str))).str[47:].str.replace('_replicate1','').str.replace('_replicate2','').str.replace('nofixative','No fixative').str.replace('glut','0.25% glutaraldehyde').str.replace('pluronic_glut','pluronic + glutaraldehyde'))
+df_summary_statistics['Treatment']=pd.Categorical(pd.Series(list(df_summary_statistics.index.astype(str))).str[47:].str.replace('_replicate1','').str.replace('_replicate2','').str.replace('_replicate3','').str.replace('nofixative','No fixative').str.replace('glut','0.25% glutaraldehyde').str.replace('pluronic_glut','pluronic + glutaraldehyde'))
 df_summary_statistics['Timepoint']=pd.Categorical('T'+((df_summary_statistics['Analysis_time']-df_summary_statistics.Analysis_time.min()).dt.days.astype(int).astype(str)),categories='T'+((df_summary_statistics['Analysis_time']-df_summary_statistics.Analysis_time.min()).dt.days.astype(int).astype(str)).unique(),ordered=True)#pd.Categorical('T'+(df_summary_statistics['Analysis_time']-df_summary_statistics.loc['Flowcam_10x_lexplore_wasam_20241002_2024-10-04_nofixative','Analysis_time']).dt.days.astype(int).astype(str),categories=['T0','T2','T4','T6','T9','T11'],ordered=True)
 # Correct the abundance in summary statistics in case any ID to skip were found
 df_summary_statistics=pd.merge(df_summary_statistics,df_metadata[['Fluid_Volume_Imaged','Skip','len_id_to_skip']],how='left',right_index=True,left_index=True)
