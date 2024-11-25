@@ -40,14 +40,14 @@ df_cropping=df_context[['AcceptableTop','AcceptableBottom','AcceptableLeft','Acc
 ## Processing vignettes mosaic
 
 runfiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions' ).expanduser().glob('Flowcam_10x_lexplore*')))#Path(r"R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\Flowcam_10x_lexplore_wasam_20241002_2024-10-09_glut\collage_70.png")#imagefiles[538]
-
+# Search for mosaic files (all starting with ***collage*) in local data storage repository
 mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_*.png')))),runfiles))
 
 # Loop through sample to generate thumbnails and ecotaxa tables:
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys()):
+for sample in list(mosaicfiles.keys())[2:3]:
 
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
     if path_to_ecotaxa.exists():
@@ -111,10 +111,10 @@ for sample in list(mosaicfiles.keys()):
             for id_of_interest in np.arange(0,len(rect_idx)):
                 if len(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]):
                     particle_id = particle_id + 1
-                    ''' Deprecated: From now on, the ID to be skipped are still part of the mosaic files to limit the number of manual steps and save time
+                    #''' Deprecated: From now on, the ID to be skipped are still part of the mosaic files to limit the number of manual steps and save time
                     while (particle_id in id_to_skip) : # If the particle was manually filtered out, skip the current id and proceed to the next one
                         particle_id = particle_id + 1
-                    '''
+                    #'''
 
 
                     vignette_id=np.pad(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
@@ -252,7 +252,7 @@ for sample in list(mosaicfiles.keys()):
     df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).rename(columns=dict(zip(df_properties_sample.columns,'Visualspreadsheet '+df_properties_sample.columns))).reset_index().astype({'Capture ID':str}).assign(Sample=sample_id.replace(' ','_')),how='left',on=['Sample','Capture ID'])
     df_properties_all=pd.concat([df_properties_all,  df_properties_merged],axis=0).reset_index(drop=True)
     filename_ecotaxa = str(save_directory.parent / save_directory.stem.rstrip().replace(' ','_') /'ecotaxa_table_{}.tsv'.format(str(sample_id).rstrip().replace(' ','_')))
-    df_ecotaxa = generate_ecotaxa_table(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
+    df_ecotaxa = generate_ecotaxa_table(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(acq_acquisition_date=lambda x: pd.to_datetime(x.Start_Time,format='%Y-%m-%d %H:%M:%S').dt.floor('1d').dt.strftime('%Y%m%d'),Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['acq_acquisition_date','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
 
     # Compress folder to prepare upload on Ecotaxa
     shutil.make_archive(str(save_directory),'zip',save_directory,base_dir=None)
@@ -275,7 +275,7 @@ plot = (ggplot(df_nbss) +
 
 plot.savefig(fname='{}/figures/Initial_test/flowcam_10x_nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 
-
+''' Deprecated : Thumbnails are now generated from mosaic files since saving raw frames during FlowCam acquisitions result in lower imaging efficiency (70 to 20 percent efficiency)
 ## Processing raw images
 # Load raw and calibration images
 outputfiles_raw = list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' ).expanduser().rglob('Flowcam_10x_lexplore*/*.tif'))
@@ -347,3 +347,4 @@ scalebar=AnchoredSizeBar(transform=ax[1].transData,size=scale_value/pixel_size.l
                            fontproperties=fontprops)
 ax[1].add_artist(scalebar)
 ax[1].set_title('Thumbnail')
+'''

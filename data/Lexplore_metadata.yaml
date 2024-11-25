@@ -4,6 +4,7 @@ ecotaxa_initial_classification_id: '[28213, 92242, 94125, 28208, 28290, 56041, 1
   15378, 95494, 12474, 28152, 15370, 15230, 31845, 15119, 11621, 95495, 11617, 15268,
   12360, 12466, 12461, 28222, 11340, 28110, 17562, 11360, 85008, 85061, 85060, 84963,
   85026, 93675, 1, 84960, 85023]'
+ecotaxa_lexplore_alga_flowcam_micro_projectid: 14791
 flowcam_10x_context_file: R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_10x_lexplore.ctx
 flowcam_macro_context_file: R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_2mm_lexplore.ctx
 fps_cytosense: 26.89
