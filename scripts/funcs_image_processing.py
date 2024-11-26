@@ -68,6 +68,7 @@ import time
 path_to_config_logon = path_to_git / 'data' / 'datafiles' / 'Lexplore_configuration_logon.yaml'
 with open(path_to_config_logon, 'r') as config_file:
     cfg_logon = yaml.safe_load(config_file)
+import itertools
 
 # Ecotaxa API module
 ## See documentation at https://github.com/ecotaxa/ecotaxa_py_client
@@ -83,6 +84,7 @@ from ecotaxa_py_client.models.taxon_model import TaxonModel
 from ecotaxa_py_client.models.user_model_with_rights import UserModelWithRights
 from ecotaxa_py_client.api import objects_api
 from ecotaxa_py_client.models.project_filters import ProjectFilters
+from ecotaxa_py_client.models.historical_classification import HistoricalClassification
 
 ## Step 1: Create an API instance based on authentication infos.
 with ecotaxa_py_client.ApiClient() as client:
@@ -206,6 +208,7 @@ def create_ecotaxa_project(ecotaxa_configuration=configuration,project_config={'
 path_to_network=Path("{}:{}".format(cfg_metadata['local_network'],os.path.sep)) # Set working directory to forel-meco
 path_to_ecotaxa_cytosense_files=Path(path_to_network /'lexplore' / 'LeXPLORE' / 'ecotaxa'  )
 path_to_ecotaxa_flowcam_files=Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data'  / 'Lexplore' / 'ecotaxa'  )
+dict_ecotaxa_types={'img_file_name':str,'object_id':str,'object_lat':float,'object_lon':float,'object_date':str,'object_time':str,'object_depth_min':float,'object_depth_max':float,'object_annotation_category':str,'object_annotation_status':str,'object_annotation_date':str,'object_annotation_time':str,'object_annotation_person_name':str,'object_annotation_person_email':str,'sample_id':str,'sample_latitude':float,'sample_longitude':float,'sample_platform':str,'sample_project':str,'sample_principal_investigator':str,'sample_depthprofile':str,'sample_storage_gear':str,'sample_fixative':str,'sample_fixative_final_concentration':float,'sample_volume_analyzed_ml':float,'sample_volume_pumped_ml':float,'sample_volume_fluid_imaged_ml':float,'sample_duration_sec':str,'acq_id':str,'acq_instrument':str,'acq_software':str,'acq_flowcell':str,'acq_objective':str,'acq_mode':str,'acq_stop_criterion':str,'acq_pumptype':str,'acq_max_width_um':float,'acq_max_height_um':float,'acq_min_diameter_um':float,'acq_max_diameter_um':float,'acq_dark_threshold':float,'acq_light_threshold':float,'acq_neighbor_distance':float,'acq_closing_iterations':float,'acq_rolling_calibration':float,'acq_flow_rate':float,'process_id':str,'process_operator':str,'process_code':str,'process_imagetype':str}
 
 def upload_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_path):
     """
@@ -284,26 +287,47 @@ def update_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_pa
                     try:
                         # Step 2: Retrieve existing taxonomic assignments for that specific acquisition
                         api_instance_objects = objects_api.ObjectsApi(api_client)
+                        api_instance_object = ecotaxa_py_client.ObjectApi(api_client)
                         api_response_samples = ecotaxa_py_client.SamplesApi(api_client).samples_search(project_ids=str(project_id), id_pattern=file.stem)
-                        api_response_objects = api_instance_objects.get_object_set(project_id=int(project_id),project_filters=ProjectFilters(statusfilter="PVD",samples=str(api_response_samples[0].sampleid)),fields="obj.orig_id,txo.display_name,obj.classif_id,obj.classif_qual,obj.classif_who,obj.classif_when,obj.classif_auto_id,obj.classif_auto_score,obj.classif_auto_when,obj.classif_crossvalidation_id")
-                        # Step 3: Append the labels to ecotaxa data table
+                        api_response_objects = api_instance_objects.get_object_set(project_id=int(project_id),project_filters=ProjectFilters(statusfilter="",samples=str(api_response_samples[0].sampleid)),fields="obj.orig_id,txo.display_name,obj.classif_id,obj.classif_qual,obj.classif_who,obj.classif_when,obj.classif_auto_id,obj.classif_auto_score,obj.classif_auto_when,obj.classif_crossvalidation_id")
+
+                        # Step 3: Append the labels to ecotaxa data table and save the classification history locally
                         df_objects = pd.DataFrame(api_response_objects.details,columns=['object_origid','object_annotation_category', 'object_annotation_category_id', 'object_annotation_status','object_annotation_person_id','object_annotation_date','object_prediction_id','object_prediction_score','object_prediction_date','object_prediction_cross_validation_id']).assign(object_id=api_response_objects.to_dict().get('object_ids'))
-                        api_response_users=pd.DataFrame(map(lambda user: ecotaxa_py_client.UsersApi(api_client).get_user(user_id=int(user)).to_dict(),df_objects.object_annotation_person_id.unique()))
+                        api_response_users=pd.DataFrame(map(lambda user: ecotaxa_py_client.UsersApi(api_client).get_user(user_id=int(user)).to_dict(),df_objects.dropna(subset=['object_annotation_person_id']).object_annotation_person_id.unique()))
                         df_objects=pd.merge(df_objects,api_response_users.rename(columns={'name':'object_annotation_person_name','email':'object_annotation_person_email'}),how='left',left_on='object_annotation_person_id',right_on='id')
+                        df_objects=df_objects.assign(object_annotation_status=lambda x: x.object_annotation_status.map({'V':'validated','P':'predicted','D':'dubious'}),object_annotation_time=lambda x: pd.to_datetime(x.object_annotation_date.astype(str),format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore') if pd.to_datetime(df_objects.object_annotation_date.astype(str),format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore').dtype!='O' else pd.NaT)
+                        df_objects['object_annotation_time']=df_objects.object_annotation_time.dt.strftime('%H%M%S')
+                        df_objects=df_objects.assign(object_annotation_date=lambda x: pd.to_datetime(x.object_annotation_date,format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore') if pd.to_datetime(df_objects.object_annotation_date.astype(str),format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore').dtype!='O' else pd.NaT)
+                        df_objects['object_annotation_date']=df_objects.object_annotation_date.dt.strftime('%Y%m%d')
+                        df_history =  pd.DataFrame(map(lambda history: history.to_dict(),list(itertools.chain(*list(map(lambda ID: api_instance_object.object_query_history(object_id=int(ID)),df_objects.object_id.unique()))))))
+                        path_to_file=file.parent /file.stem / 'ecotaxa_table_{}.tsv'.format(file.stem.rstrip().replace(' ','_'))
+                        df_history.to_csv(str(path_to_file).replace('ecotaxa_table_','annotations_table_'), sep='\t', index=False)
+                        df_ecotaxa=pd.read_table(path_to_file,sep='\t',skiprows=1,header=None,dtype=dict_ecotaxa_types)
+                        df_ecotaxa.columns=pd.read_table(path_to_file,sep='\t',nrows=1,header=None).loc[0]
+                        df_ecotaxa.loc[1:,'object_time']=df_ecotaxa.loc[1:,'object_time'].astype(str).str.zfill(6)
+                        df_ecotaxa.loc[1:,'object_date'] = df_ecotaxa.loc[1:,'object_date'].astype(str).str.zfill(6)
+                        df_ecotaxa=pd.merge(df_ecotaxa.astype({'object_id':str})[['object_id']+[column for column in df_ecotaxa.columns if column not in df_objects.columns]],df_objects.astype({'object_origid':str})[['object_origid', 'object_annotation_category', 'object_annotation_status', 'object_annotation_date', 'object_annotation_time', 'object_annotation_person_name', 'object_annotation_person_email', 'object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id']],how='left',left_on='object_id',right_on='object_origid').drop(columns='object_origid')
+                        df_ecotaxa.loc[0,[ 'object_annotation_category', 'object_annotation_status', 'object_annotation_date', 'object_annotation_time', 'object_annotation_person_name', 'object_annotation_person_email', 'object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id']]=['[t]','[t]','[t]','[t]','[t]','[t]','[t]','[f]','[t]','[t]']
+                        df_ecotaxa_update=df_ecotaxa.copy()[['img_file_name']+[column for column in df_ecotaxa.columns if 'object_' in column]+[column for column in df_ecotaxa.columns if 'sample_' in column]+[column for column in df_ecotaxa.columns if 'acq_' in column]+[column for column in df_ecotaxa.columns if 'process_' in column]].drop(columns=['object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id'])
+                        df_ecotaxa_update.to_csv(path_to_file, sep='\t', index=False)
+                        file.unlink(missing_ok=True)
+                        shutil.make_archive(str(path_to_file.parent), 'zip', path_to_file.parent, base_dir=None)
 
-                        df_ecotaxa=pd.read_table(file.parent /file.stem / 'ecotaxa_table_{}.tsv'.format(file.stem.rstrip().replace(' ','_')),sep='\t')
-                        df_ecotaxa=pd.merge(df_ecotaxa,df_objects[['object_origid', 'object_annotation_category', 'object_annotation_status', 'object_annotation_date', 'object_annotation_person_name', 'object_annotation_person_email', 'object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id', 'object_annotation_person_email','object_annotation_person_name']],how='left',left_on='object_id',right_on='object_origid')
-                        df_ecotaxa_update=pd.concat([[df_ecotaxa[column for column in df_ecotaxa.columns if 'object_' in column]],pd.DataFrame()],axis=1)
+                        # Step 4: Erase objects, otherwise the thumbnails cannot be updated through regular import method
+                        confirmation=input('Updating thumbnails, data, and metadata for acquisition {}. Would you like to quit (press enter) or continue (type continue)'.format(file.stem))
+                        if confirmation=='':
+                            continue
+                        api_response_erase_objects=api_instance_objects.erase_object_set(request_body=list(map(int,df_objects.object_id.astype(int).unique())))
 
-                        # Step 4: Upload zip file to create import task request
+                        # Step 5: Upload zip file to create import task request
                         api_response_file = api_instance_files.post_user_file(file=str(file),  tag='datafiles_project_{}'.format(project_id))
 
-                        # Step 5: Creating a task (job) to upload the zip file adn append the data to the existing project with pre-existing labels
-                        import_project_req = ImportReq(source_path=api_response_file, taxo_mappings=None,skip_loaded_files=False, skip_existing_objects=False)
+                        # Step 6: Creating a task (job) to upload the zip file with pre-existing labels
+                        import_project_req = ImportReq(source_path=api_response_file, taxo_mappings=None,skip_loaded_files=False, skip_existing_objects=True)
                         api_response = api_instance.import_file(project_id, import_req=import_project_req)
                         job_id = api_response.job_id
 
-                        # Step 6: Check the job status
+                        # Step 7: Check the job status
                         # Insert a progress bar to allow for the job to be done based on get_job status.
                         # Attention, the break cannot be timed with job progress=(percentage) due to a small temporal offset between job progress and status
                         job_status = 'R'  # percent = 0
@@ -320,7 +344,7 @@ def update_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_pa
                     except Exception as e:
                         project_id = None
                         print("Error updating project {} using {}. Please check your connection or EcoTaxa server".format(str(project_id)+' (https://ecotaxa.obs-vlfr.fr/prj/{})'.format(str(project_id)),file.stem))
-                    # Step 7: Update the progress bar and move to new zip file
+                    # Step 8: Update the progress bar and move to new zip file
                     percent = np.round(100 * (bar.n / len(datafiles)), 1)
                     bar.set_description("Working on project update {} (%s%%)".format(file.stem) % percent, refresh=True)
                     # and update progress bar
