@@ -29,7 +29,6 @@ if not Path('{}/figures/Initial_test/cytosense_calibration_flowrate.png'.format(
             theme_paper+theme(axis_title=element_text(size=16),axis_text=element_text(size=16))).draw(show=False)
     plot.savefig(fname='{}/figures/Initial_test/cytosense_calibration_flowrate.png'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 
-path_to_network=Path("R:{}".format(os.path.sep)) # Set working directory to forel-meco
 outputfiles = list(Path(Path.home() / 'Documents'/'My CytoSense'/'Outputfiles').expanduser().rglob('*.jpg'))
 
 exportfiles=natsorted(list(Path(path_to_network /'lexplore' / 'LeXPLORE' / 'export files' / 'IIF' ).expanduser().rglob('lexplore_lakewater_surface_smart*_Images.zip')))#
@@ -167,6 +166,8 @@ for sample in list(imagefiles.keys()):
         # Generate abd save table for EcoTaxa
     filename_ecotaxa = str(save_directory /'ecotaxa_table_{}.tsv'.format(str(sample).rstrip()))
     df_ecotaxa = generate_ecotaxa_table(df=pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.loc[sample].to_frame().T.assign(sample_trigger=lambda x: pd.Series(x.values[0])[pd.Series(x.values[0]).astype(str).str.contains('TRIGGER')].values[0].split('-')[0].strip().replace(' ','')).rename(columns={'Volume_analyzed':'sample_volume_analyzed_ml','Volume_pumped':'sample_volume_pumped_ml','Volume_Fluid_imaged':'sample_volume_fluid_imaged_ml','Trigger level (mV)':'sample_trigger_threshold_mv','Measurement_duration':'sample_duration_sec','Flow_rate':'sample_flow_rate'})[['sample_trigger','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_trigger_threshold_mv','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='CytoSense', path_to_storage=filename_ecotaxa)
+    # Compress folder to prepare upload on Ecotaxa
+    shutil.make_archive(str(save_directory), 'zip', save_directory, base_dir=None)
     # Generate Normalized Biovolume Size Spectra
     df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Volume_Fluid_imaged.astype(float))[['volume','Measurement_duration']],how='left',right_index=True,left_on=['Sample']), pixel_size=1, grouping_factor=['Sample']) # Rest pixel size to 1 since pixel units were already converted to metric units
     df_nbss=pd.concat([df_nbss,df_nbss_sample],axis=0).reset_index(drop=True)

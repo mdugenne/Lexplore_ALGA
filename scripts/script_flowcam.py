@@ -14,13 +14,13 @@ except:
 import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
 pytesseract.pytesseract.tesseract_cmd = r'{}\AppData\Local\Programs\Tesseract-OCR\tesseract'.format(str(Path.home()))
 
+matplotlib.use('Qt5Agg')
 
 # Identification of the variables of interest in visualspreadsheet summary tables
-
 #Workflow starts here
-path_to_network=Path("{}:".format(cfg_metadata['local_path_storage'])) # Set working directory to forel-meco
+
 # Load metadata files (volume imaged, background pixel intensity, etc.) and save entries into separate tables (metadata and statistics)
-metadatafiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_10x_lexplore*/*_summary.csv'))
+metadatafiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_*_lexplore*/*_summary.csv')))
 metadatafiles=list(filter(lambda element: element.parent.parent.stem not in ['Tests','Blanks'],metadatafiles)) # Discard test and blank acquisitions
 df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name.replace(' ','_')})),df:=df[[col for col in df.columns if col in summary_metadata_columns]])[-1],metadatafiles),axis=0)
 #Check the fluid volume imaged calculation based on the number of frames used.
@@ -33,27 +33,27 @@ df_summary_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',
 df_pixel=df_metadata[['Magnification','Calibration_Factor']]
 
 # Load context file for cropping area
-contextfiles=list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions').rglob('*_10x_*.ctx'))
-df_context=pd.concat(map(lambda file:pd.read_csv(file,sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains("\[",case=True)').set_index('Name').T.rename(index={'Value':file.parent.name}),contextfiles))
 df_cropping=df_context[['AcceptableTop','AcceptableBottom','AcceptableLeft','AcceptableRight']]
 
 ## Processing vignettes mosaic
 
-runfiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions' ).expanduser().glob('Flowcam_10x_lexplore*')))#Path(r"R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\Flowcam_10x_lexplore_wasam_20241002_2024-10-09_glut\collage_70.png")#imagefiles[538]
-# Search for mosaic files (all starting with ***collage*) in local data storage repository
+runfiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions' ).expanduser().glob('Flowcam_*_lexplore*')))#Path(r"R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\Flowcam_10x_lexplore_wasam_20241002_2024-10-09_glut\collage_70.png")#imagefiles[538]
+# Search for mosaic files (all starting with ***collage***) in local data storage repository
 mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_*.png')))),runfiles))
 
-# Loop through sample to generate thumbnails and ecotaxa tables:
+# Loop through sample to (1) generate thumbnails, (2) ecotaxa tables, (3) upload on Ecotaxa, (4) compute Normalized Biovolume Size Spectrum:
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys())[2:3]:
+for sample in list(mosaicfiles.keys()):
 
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
     if path_to_ecotaxa.exists():
         continue
     df_properties_sample_merged=pd.DataFrame()
     particle_id = 0
+    # Reset flow rate in metadat based on context file
+    df_metadata.loc[sample,'Flow_Rate']=df_context.loc[df_context.index.str.lower().str.split('_').str[1:3].str.join('_').str.contains('_'.join(sample.lower().split('_')[0:2])),'PumpFlowRate'].values[0]+ ' ml/min' if str(df_metadata.loc[sample,'Flow_Rate'])=='nan' else df_metadata.loc[sample,'Flow_Rate']
     df_volume =pd.concat([df_volume,df_metadata.loc[sample].to_frame().T],axis=0)
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     if path_to_data.exists():
@@ -61,7 +61,7 @@ for sample in list(mosaicfiles.keys())[2:3]:
     else:
         df_properties_sample=pd.DataFrame(dict(zip(list(dict_properties_visual_spreadsheet.keys()),[pd.NA]*len((dict_properties_visual_spreadsheet.keys())))),index=[0])
     # Load the background image to performs segmentation and re-compute morphometric properties using the same algorithm as CytoSense
-    cropping_area = df_cropping.loc['acquisitions']
+    #cropping_area = df_cropping.loc['acquisitions']
     background = ski.io.imread(path_to_data.parent/'cal_image_000001.tif' ,as_gray=True)#[int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]
     ##plt.figure(),plt.imshow(cv2.cvtColor(background, cv2.COLOR_BGR2RGB), cmap='gray'),plt.show()
     with tqdm(desc='Generating vignettes for run {}'.format(sample), total=len(natsorted(mosaicfiles[sample])), bar_format='{desc}{bar}', position=0, leave=True) as bar:
@@ -160,16 +160,19 @@ for sample in list(mosaicfiles.keys())[2:3]:
                     ##plt.figure(),plt.imshow(diff_image),plt.show()
                     edges = ski.filters.sobel(diff_image)
                     markers = np.zeros_like(diff_image)
-                    markers[diff_image >(df_context_flowcam_micro.astype({'ThresholdDark': float, 'ThresholdLight': float})[ ['ThresholdDark', 'ThresholdLight']].min(axis=1).values / 255)] = 1
-                    #markers[diff_image > (1/df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].max(axis=1).values)] = 1
+                    threshold=df_context.loc[df_context.index.str.replace('context_','').str.contains('_'.join(sample.lower().split('_')[0:3])),['ThresholdDark', 'ThresholdLight']]
+                    markers[diff_image >(threshold.astype({'ThresholdDark': float, 'ThresholdLight': float})[ ['ThresholdDark', 'ThresholdLight']].min(axis=1).values / 255)] = 1
+                    #markers[diff_image > (1/threshold.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].max(axis=1).values)] = 1
                     #markers[edges > np.quantile(edges, 0.85)] = 1
                     markers[(sp.ndimage.binary_closing(edges) == False)] = 0
                     ##plt.figure(), plt.imshow(markers, cmap='gray'), plt.show()
                     fill_image = ski.morphology.erosion(ski.morphology.erosion(ski.morphology.closing(ski.morphology.dilation(markers,mode='constant'))))
-                    fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(np.floor(df_context.DistanceToNeighbor.astype(float).values[0]/pixel_size/4)))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
+                    distance_neighbor=df_context.loc[df_context.index.str.replace('context_','').str.contains('_'.join(sample.lower().split('_')[0:3])),['DistanceToNeighbor']]
+                    fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(np.max([1,int(np.floor(distance_neighbor.DistanceToNeighbor.astype(float).values[0]/pixel_size/4))]))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
                     ##plt.figure(), plt.imshow(fill_image, cmap='gray'), plt.show()
                     label_objects, nb_labels = sp.ndimage.label(fill_image)
-                    label_objects = ski.morphology.remove_small_objects(label_objects, min_size=float( df_context.MinESD.values[0]) / pixel_size)
+                    min_esd=df_context.loc[df_context.index.str.replace('context_','').str.contains('_'.join(sample.lower().split('_')[0:3])),['MinESD']]
+                    label_objects = ski.morphology.remove_small_objects(label_objects, min_size=float( min_esd.MinESD.values[0]) / pixel_size)
                     label_objects, nb_labels = sp.ndimage.label(label_objects) # Needs to re-assign the label after discarding small objects
                     # plt.figure(),plt.imshow(label_objects),plt.show()
                     # plt.figure(),plt.imshow(label_objects.astype(bool).astype(int)),plt.show()
@@ -178,17 +181,17 @@ for sample in list(mosaicfiles.keys())[2:3]:
                     edges = ski.filters.sobel(background_cropped)
                     markers = np.zeros_like(background_cropped)
                     markers[edges > np.quantile(edges, 0.99)] = 1
-                    markers[edges > (df_context_flowcam_micro.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].min(axis=1).values/255)] = 1
+                    markers[edges > (threshold.astype({'ThresholdDark':float, 'ThresholdLight':float})[['ThresholdDark', 'ThresholdLight']].min(axis=1).values/255)] = 1
                     markers[(sp.ndimage.binary_closing(edges) == False)] = 0
 
                     # plt.figure(),plt.imshow(markers, cmap='gray'),plt.show()
                     fill_image = sp.ndimage.binary_fill_holes(markers)
                     fill_image = ski.morphology.erosion(ski.morphology.erosion(ski.morphology.closing(ski.morphology.dilation(markers,mode='constant'))))
-                    fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(int(np.floor(df_context.DistanceToNeighbor.astype(float).values[0]/pixel_size/4)))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
+                    fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(np.max([1,int(np.floor(distance_neighbor.DistanceToNeighbor.astype(float).values[0]/pixel_size/4))]))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
 
                     # plt.figure(),plt.imshow(fill_image),plt.show()
                     label_objects_background, nb_labels_background = sp.ndimage.label(fill_image)
-                    label_objects_background = ski.morphology.remove_small_objects(label_objects_background, min_size=float( df_context.MinESD.values[0]) / pixel_size)
+                    label_objects_background = ski.morphology.remove_small_objects(label_objects_background, min_size=float( min_esd.MinESD.values[0]) / pixel_size)
                     label_objects_background, nb_labels_background = sp.ndimage.label(label_objects_background)
                     ## plt.figure(),plt.imshow(label_objects_background.astype(bool).astype(int)),plt.show()
                     ## plt.figure(), plt.imshow( label_objects_background.astype(bool).astype(int)-(label_objects.astype(bool).astype(int))),plt.show()
@@ -197,8 +200,8 @@ for sample in list(mosaicfiles.keys())[2:3]:
                     # plt.figure(),plt.imshow(label_diff),plt.show()
 
                     # Discard objects with same bounding box plus/minus neighbor pixels
-                    ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_objects,shift_x=int(df_context.DistanceToNeighbor.astype(float).values[0]),shift_y=int(df_context.DistanceToNeighbor.astype(float).values[0])), properties=['slice'])
-                    ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_diff, shift_x=int(df_context.DistanceToNeighbor.astype(float).values[0]), shift_y=int( df_context.DistanceToNeighbor.astype(float).values[0])), properties=['slice'])
+                    ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_objects,shift_x=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])]),shift_y=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])])), properties=['slice'])
+                    ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_diff, shift_x=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])]), shift_y=np.max([1,int( distance_neighbor.DistanceToNeighbor.astype(float).values[0])])), properties=['slice'])
                     if ski.measure.intersection_coeff(label_objects.astype(bool).astype(int), label_diff.astype(bool).astype(int)) < 0.80:
                         id_to_discard=pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).slice.isin(pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).slice.unique()))==False]+1
                     else:
@@ -274,6 +277,15 @@ plot = (ggplot(df_nbss) +
         theme_paper).draw(show=False)
 
 plot.savefig(fname='{}/figures/Initial_test/flowcam_10x_nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
+# Plot the sizes comparison
+plot = (ggplot(df_properties_all.assign(instrument=lambda x: x.Sample.str.split('_').str[0:2].str.join('_'))) +
+        geom_point(mapping=aes(x='equivalent_diameter_area', y='Visualspreadsheet Diameter (ABD)',fill='instrument'),size=0.1, alpha=1) +  #
+        geom_abline(slope=1,intercept=0)+
+        labs(x='Equivalent circular diameter from de-novo segmentation ($\mu$m)',y='Equivalent circular diameter from vp segmentation ($\mu$m)', title='',colour='') +
+        scale_y_log10(limits=[1,10000],breaks=np.multiply(10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape(int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1),np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        scale_x_log10(limits=[1,10000], breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
 
 ''' Deprecated : Thumbnails are now generated from mosaic files since saving raw frames during FlowCam acquisitions result in lower imaging efficiency (70 to 20 percent efficiency)
 ## Processing raw images
