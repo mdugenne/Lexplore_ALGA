@@ -221,7 +221,7 @@ def upload_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_pa
       """
 
     # Step 1 : Search for zip files in the source_path directory
-    datafiles=list(Path(source_path).expanduser().glob('*.zip'))
+    datafiles=[Path(source_path).expanduser()] if Path(source_path).expanduser().exists() else list(Path(source_path).expanduser().glob('*.zip'))
     if len(datafiles):
         with ecotaxa_py_client.ApiClient(ecotaxa_configuration) as api_client:
             # Create the necessary file (zip files should be temporarily stored on Ecotaxa ftp server), job (task), project (update) instances of the API
@@ -274,7 +274,7 @@ def update_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_pa
       """
 
     # Step 1 : Search for zip files in the source_path directory
-    datafiles=list(Path(source_path).expanduser().glob('*.zip'))
+    datafiles=[Path(source_path).expanduser()] if Path(source_path).expanduser().exists() else list(Path(source_path).expanduser().glob('*.zip'))
     if len(datafiles):
         with ecotaxa_py_client.ApiClient(ecotaxa_configuration) as api_client:
             # Create the necessary file (zip files should be temporarily stored on Ecotaxa ftp server), job (task), project (update) instances of the API

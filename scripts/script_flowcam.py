@@ -23,7 +23,8 @@ matplotlib.use('Qt5Agg')
 metadatafiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_*_lexplore*/*_summary.csv')))
 metadatafiles=list(filter(lambda element: element.parent.parent.stem not in ['Tests','Blanks'],metadatafiles)) # Discard test and blank acquisitions
 df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name.replace(' ','_')})),df:=df[[col for col in df.columns if col in summary_metadata_columns]])[-1],metadatafiles),axis=0)
-#Check the fluid volume imaged calculation based on the number of frames used.
+df_metadata=df_metadata.assign(Ecotaxa_project=lambda x: x.index.astype(str).str.lower().str.split('_').str[0:2].str.join('_').map({'flowcam_10x':'Lexplore_ALGA_Flowcam_micro','flowcam_2mm':'Lexplore_ALGA_Flowcam_macro'}),Instrument='FlowCam')
+# Check the fluid volume imaged calculation based on the number of frames used.
 df_metadata.Used.astype(float)/df_metadata.Fluid_Volume_Imaged.str.split(' ').str[0].astype(float)
 # This should be constant if the area of acceptable region, the size calibration, and the depth of the flow cell are kept constant
 df_particle_statistics=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).reset_index(drop=True),df:=df[df.query('Name.str.contains(r"\=",case=True)').index[0]:].reset_index(drop=True) ,df_summary_statistics:=pd.DataFrame([(df.query('Name.str.contains(r"\=",case=True)').index).tolist(),((df.query('Name.str.contains(r"\=",case=True)').index)[1:]-1).tolist()+[len(df)]]).T.apply(lambda id:{df.loc[id[0],'Name'].split(' ')[1]:pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),df.loc[id[0]+1:id[1],'Value'].values.tolist()[1].split(','))),index=[file.parent.name]) if len(df.loc[id[0]+1:id[1],'Value'].values.tolist())>1 else pd.DataFrame(dict(zip(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(','),[np.nan]*len(df.loc[id[0]+1:id[1],'Value'].values.tolist()[0].split(',')))),index=[file.parent.name.replace(' ','_')])},axis=1,result_type='reduce'),final_df:=list(df_summary_statistics[[id for id,key in df_summary_statistics.items() if 'Particle' in key.keys()][0]].values())[0] if len([id for id,key in df_summary_statistics.items() if 'Particle' in key.keys()]) else pd.DataFrame({},index=[file.parent.name.replace(' ','_')]))[-1],metadatafiles),axis=0)
@@ -45,17 +46,19 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys()):
-
+for sample in list(mosaicfiles.keys())[6:7]:
+    sample_id=sample
+    path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
     if path_to_ecotaxa.exists():
         continue
     df_properties_sample_merged=pd.DataFrame()
     particle_id = 0
     # Reset flow rate in metadat based on context file
+    sample = sample.replace(' ', '_')
     df_metadata.loc[sample,'Flow_Rate']=df_context.loc[df_context.index.str.lower().str.split('_').str[1:3].str.join('_').str.contains('_'.join(sample.lower().split('_')[0:2])),'PumpFlowRate'].values[0]+ ' ml/min' if str(df_metadata.loc[sample,'Flow_Rate'])=='nan' else df_metadata.loc[sample,'Flow_Rate']
     df_volume =pd.concat([df_volume,df_metadata.loc[sample].to_frame().T],axis=0)
-    path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
+
     if path_to_data.exists():
         df_properties_sample=pd.read_csv(path_to_data,encoding='latin-1',index_col='Capture ID')
     else:
@@ -64,14 +67,14 @@ for sample in list(mosaicfiles.keys()):
     #cropping_area = df_cropping.loc['acquisitions']
     background = ski.io.imread(path_to_data.parent/'cal_image_000001.tif' ,as_gray=True)#[int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]
     ##plt.figure(),plt.imshow(cv2.cvtColor(background, cv2.COLOR_BGR2RGB), cmap='gray'),plt.show()
-    with tqdm(desc='Generating vignettes for run {}'.format(sample), total=len(natsorted(mosaicfiles[sample])), bar_format='{desc}{bar}', position=0, leave=True) as bar:
-        for file in natsorted([str(file) for file in mosaicfiles[sample]]):
+    with tqdm(desc='Generating vignettes for run {}'.format(sample_id), total=len(natsorted(mosaicfiles[sample_id])), bar_format='{desc}{bar}', position=0, leave=True) as bar:
+        for file in natsorted([str(file) for file in mosaicfiles[sample_id]]):
 
             file=Path(file).expanduser()
-            percent = np.round(100 * (bar.n / len(mosaicfiles[sample])), 1)
+            percent = np.round(100 * (bar.n / len(mosaicfiles[sample_id])), 1)
             bar.set_description('Generating vignettes for run {} (%s%%)'.format(sample) % percent, refresh=True)
-            sample_id=file.parent.name
-            pixel_size = float(df_pixel.at[file.parent.name, 'Calibration_Factor'].strip(' '))  # in microns per pixel
+
+            pixel_size = float(df_pixel.at[sample, 'Calibration_Factor'].strip(' '))  # in microns per pixel
 
 
             # Crop the bottom pixels (-30 pixels) of the mosaic, otherwise long particles may coincide with the bottom caption and be discarded
@@ -101,8 +104,8 @@ for sample in list(mosaicfiles.keys()):
             # A line should be added manually in the summary export files to inform the particles ID (capture ID) that were manually filtered out
             # e.g. Particle Count, 3300
             #      Skip,[2235:2253]+[2255:2264]+[2266]
-            if df_metadata.astype({'Skip':str}).loc[sample_id,'Skip']!='nan':
-                id_to_skip = sum(list(map(lambda id: list(np.arange(int(re.sub('\W+', '', id.split(':')[0])), int(re.sub('\W+', '', id.split(':')[1])) + 1)) if len( id.split(':')) == 2 else [int(re.sub('\W+', '', id))], df_metadata.loc[sample_id, 'Skip'].split(r']+['))), [])
+            if df_metadata.astype({'Skip':str}).loc[sample,'Skip']!='nan':
+                id_to_skip = sum(list(map(lambda id: list(np.arange(int(re.sub('\W+', '', id.split(':')[0])), int(re.sub('\W+', '', id.split(':')[1])) + 1)) if len( id.split(':')) == 2 else [int(re.sub('\W+', '', id))], df_metadata.loc[sample, 'Skip'].split(r']+['))), [])
                 #if len(id_to_skip)!=(int(df_metadata.astype({'Particle_Count':float}).loc[sample_id,'Particle_Count'])-int(df_summary_statistics.loc[sample_id,'Count'])):
                     #print('\nAttention, Number of particles to skip is different than the difference between total particle count and particle count in the "Metadata statistics table".\nSkipping run {}. Please check the summary file and data file for missing particles'.format(sample_id))
                     #continue
@@ -234,7 +237,7 @@ for sample in list(mosaicfiles.keys()):
                             fig, axes = plt.subplots(1, 1)
                             ##fig.tight_layout(pad=0, h_pad=0, w_pad=-1)
                             #plt.imshow(np.lib.pad(contour, ((25, 25), (padding, padding)), constant_values=0), cmap='gray_r')
-                            plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=float( df_metadata.at[file.parent.name, 'Background_Intensity_Mean'])), cmap='gray')
+                            plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=float( df_metadata.at[sample, 'Background_Intensity_Mean'])), cmap='gray')
 
                             axes.set_axis_off()
                             scalebar = AnchoredSizeBar(transform=axes.transData, size=scale_value / pixel_size,
@@ -245,20 +248,31 @@ for sample in list(mosaicfiles.keys()):
                                                        fontproperties=fontprops)
                             axes.add_artist(scalebar)
                             # axes.set_title('Particle ID: {}'.format(str(particle_id)))
-                            save_directory = Path(str(file.parent).replace('acquisitions', 'ecotaxa')).expanduser()
+                            save_directory = Path(str(file.parent).replace('acquisitions', 'ecotaxa')).expanduser().parent / sample
                             save_directory.mkdir(parents=True, exist_ok=True)
-                            fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.jpg'.format(str(sample_id).rstrip().replace(' ','_'), str(particle_id).rstrip())),transparent=False,  bbox_inches="tight",pad_inches=0,dpi=300)
+                            fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.jpg'.format(str(sample).rstrip(), str(particle_id).rstrip())),transparent=False,  bbox_inches="tight",pad_inches=0,dpi=300)
                             plt.close('all')
 
             bar.update(n=1)
     # Merge the de-novo properties datatable with FlowCam data, re-format for EcoTaxa and save
-    df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).rename(columns=dict(zip(df_properties_sample.columns,'Visualspreadsheet '+df_properties_sample.columns))).reset_index().astype({'Capture ID':str}).assign(Sample=sample_id.replace(' ','_')),how='left',on=['Sample','Capture ID'])
+    df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).rename(columns=dict(zip(df_properties_sample.columns,'Visualspreadsheet '+df_properties_sample.columns))).reset_index().astype({'Capture ID':str}).assign(Sample=sample),how='left',on=['Sample','Capture ID'])
     df_properties_all=pd.concat([df_properties_all,  df_properties_merged],axis=0).reset_index(drop=True)
-    filename_ecotaxa = str(save_directory.parent / save_directory.stem.rstrip().replace(' ','_') /'ecotaxa_table_{}.tsv'.format(str(sample_id).rstrip().replace(' ','_')))
+    filename_ecotaxa = str(save_directory.parent / save_directory.stem.rstrip().replace(' ','_') /'ecotaxa_table_{}.tsv'.format(str(sample).rstrip()))
     df_ecotaxa = generate_ecotaxa_table(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(acq_acquisition_date=lambda x: pd.to_datetime(x.Start_Time,format='%Y-%m-%d %H:%M:%S').dt.floor('1d').dt.strftime('%Y%m%d'),Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['acq_acquisition_date','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
 
     # Compress folder to prepare upload on Ecotaxa
     shutil.make_archive(str(save_directory),'zip',save_directory,base_dir=None)
+
+    # Generate a project on Ecotaxa and upload successive samples
+    if 'ecotaxa_'+df_metadata.loc[sample,'Ecotaxa_project'].lower()+'_projectid' not in cfg_metadata.keys():
+        create_ecotaxa_project(ecotaxa_configuration=configuration,
+                               project_config={'clone of id':None, 'title': 'Lexplore_ALGA_Flowcam_{}'.format(df_metadata.loc[sample,'Ecotaxa_project'].split('_')[-1]),
+                                               'instrument': 'FlowCam',
+                                               'managers': [cfg_metadata['principal_investigator']]+cfg_metadata['instrument_operator'].split(' / '),
+                                               'project_description': 'This dataset includes thumbnails generated by a FlowCam {}. Acquisitions are done on samples collected on a daily basis at the surface of Lake Geneva as part of the ALGA project (PI: Bastiaan Ibelings)'.format(df_metadata.loc[sample,'Ecotaxa_project'].split('_')[-1])},update_configuration=True)
+
+    upload_thumbnails_ecotaxa_project(ecotaxa_configuration=configuration, project_id=int(cfg_metadata['ecotaxa_'+df_metadata.loc[sample,'Ecotaxa_project'].lower()+'_projectid']), source_path=str(save_directory)+'.zip')
+
     # Generate Normalized Biovolume Size Spectra
     df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float))[['volume']],how='left',right_index=True,left_on=['Sample']), pixel_size=1, grouping_factor=['Sample']) # Set pixel size to 1 since pixel units were already converted to metric units
     df_nbss=pd.concat([df_nbss,df_nbss_sample],axis=0).reset_index(drop=True)
@@ -268,14 +282,14 @@ for sample in list(mosaicfiles.keys()):
 plot = (ggplot(df_nbss) +
         #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
         #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
-        geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
+        #geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
         geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='Sample'), alpha=1)+
         labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',colour='') +
         scale_y_log10(breaks=10 ** np.arange(np.floor(np.log10(1e-01)) - 1, np.ceil(np.log10(1e+04)), step=1),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
         scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
         guides(colour=None,fill=None)+
         theme_paper).draw(show=False)
-
+#plot.show()
 plot.savefig(fname='{}/figures/Initial_test/flowcam_10x_nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 # Plot the sizes comparison
 plot = (ggplot(df_properties_all.assign(instrument=lambda x: x.Sample.str.split('_').str[0:2].str.join('_'))) +
