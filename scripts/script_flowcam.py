@@ -46,7 +46,7 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys())[6:7]:
+for sample in list(mosaicfiles.keys())[16:17]:
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -114,14 +114,14 @@ for sample in list(mosaicfiles.keys())[6:7]:
             for id_of_interest in np.arange(0,len(rect_idx)):
                 if len(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]):
                     particle_id = particle_id + 1
-                    #''' Deprecated: From now on, the ID to be skipped are still part of the mosaic files to limit the number of manual steps and save time
+                    ''' Deprecated: From now on, the ID to be skipped are still part of the mosaic files to limit the number of manual steps and save time
                     while (particle_id in id_to_skip) : # If the particle was manually filtered out, skip the current id and proceed to the next one
                         particle_id = particle_id + 1
-                    #'''
+                    '''
 
 
                     vignette_id=np.pad(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
-                    ##plt.figure(),plt.imshow(vignette_id),plt.show()
+                    ##plt.figure(),plt.imshow(vignette_id, cmap='gray'),plt.show()
                     ##plt.figure(),plt.imshow(cv2.cvtColor(colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)], cv2.COLOR_BGR2RGB)),plt.show()
                     ''' # Obsolete unless some particles got deleted in visualspreadsheet and not properly identified in the sample summary file
                     capture_id=np.pad(np.where(np.in1d(labelled,labelid_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[labelid_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)],20,constant_values=0)
@@ -145,7 +145,7 @@ for sample in list(mosaicfiles.keys())[6:7]:
                     print(pytesseract.image_to_string(np.where(np.in1d(labelled,labelid_idx[0]).reshape(labelled.shape),image,0),config='--psm 13 outputbase digits'))
                     '''
 
-                    #Use background image to perform de novo segmentation
+                    #Use background image to perform de-novo segmentation
 
                     cropped_top=df_properties_sample.loc[particle_id,'Capture Y']
                     cropped_bottom=cropped_top+df_properties_sample.loc[particle_id,'Image Height']
@@ -199,14 +199,16 @@ for sample in list(mosaicfiles.keys())[6:7]:
                     ## plt.figure(),plt.imshow(label_objects_background.astype(bool).astype(int)),plt.show()
                     ## plt.figure(), plt.imshow( label_objects_background.astype(bool).astype(int)-(label_objects.astype(bool).astype(int))),plt.show()
                     label_diff=label_objects.copy()
-                    label_diff[(label_objects.astype(bool).astype(int)==1)&(label_objects_background.astype(bool).astype(int)-(label_objects.astype(bool).astype(int))!=-1)]=0
+                    #label_diff[(label_objects.astype(bool).astype(int)==1)&(label_objects_background.astype(bool).astype(int)-(label_objects.astype(bool).astype(int))!=-1)]=0
+                    label_diff[(label_objects.astype(bool).astype(int) == 1) & ( label_objects_background.astype(bool).astype(int) - (label_objects.astype(bool).astype(int)) != 0)] = 0
+
                     # plt.figure(),plt.imshow(label_diff),plt.show()
 
                     # Discard objects with same bounding box plus/minus neighbor pixels
                     ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_objects,shift_x=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])]),shift_y=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])])), properties=['slice'])
                     ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_diff, shift_x=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])]), shift_y=np.max([1,int( distance_neighbor.DistanceToNeighbor.astype(float).values[0])])), properties=['slice'])
-                    if ski.measure.intersection_coeff(label_objects.astype(bool).astype(int), label_diff.astype(bool).astype(int)) < 0.80:
-                        id_to_discard=pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).slice.isin(pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).slice.unique()))==False]+1
+                    if any(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int)),np.arange(1,nb_labels+1)))) > 0.80: #<
+                        id_to_discard=list(np.where(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int))>0.80,np.arange(1,nb_labels+1))))[0]+1)#pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).slice.isin(pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).slice.unique()))==True]+1
                     else:
                         id_to_discard=[]
                     if len(id_to_discard):

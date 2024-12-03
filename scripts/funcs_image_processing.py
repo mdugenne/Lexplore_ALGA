@@ -541,3 +541,30 @@ def generate_ecotaxa_table(df,instrument,path_to_storage=None):
     if len(path_to_storage):
         df_ecotaxa.to_csv(path_to_storage, sep='\t',index=False)
     return df_ecotaxa
+
+def season(date,hemisphere):
+    """
+    Objective: This function returns the season of a sampling time
+    :param date: A datetime object
+    :param hemisphere: "north" or "south"
+    :return: Returns the assigned season
+    """
+    md = date.month * 100 + date.day
+
+    if ((md > 320) and (md < 621)):
+        s = 0 #spring
+    elif ((md > 620) and (md < 923)):
+        s = 1 #summer
+    elif ((md > 922) and (md < 1223)):
+        s = 2 #fall
+    else:
+        s = 3 #winter
+
+    if hemisphere != 'north':
+        if s < 2:
+            s += 2
+        else:
+            s -= 2
+
+    return {0:'Spring',1:'Summer',2:'Fall',3:'Winter'}[s]
+
