@@ -12,7 +12,7 @@ The objective for the project Interreg/ALGA are:
 
 3. support early warning and decision tools regarding potential outbreaks for lake stakeholders
 
-4. understanding the environmental conditions leading to phytoplankton outbreaks
+4. understand the environmental conditions leading to phytoplankton outbreaks
 
 <img clear="both" src="https://github.com/mdugenne/Lexplore_ALGA/blob/main/figures/readme/ALGA_logo.png" width="100%" style="  float:right; padding:0.7em"/>
 

@@ -46,7 +46,7 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys()):
+for sample in list(mosaicfiles.keys())[32:33]:
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -291,7 +291,7 @@ plot = (ggplot(df_nbss) +
         scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
         guides(colour=None,fill=None)+
         theme_paper).draw(show=False)
-#plot.show()
+plot.show()
 plot.savefig(fname='{}/figures/Initial_test/flowcam_10x_nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 # Plot the sizes comparison
 plot = (ggplot(df_properties_all.assign(instrument=lambda x: x.Sample.str.split('_').str[0:2].str.join('_'))) +

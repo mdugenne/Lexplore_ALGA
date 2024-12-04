@@ -9,7 +9,7 @@ from scripts.funcs_image_processing import cfg_metadata
 # Testing the frame rate correction for volume imaged
 ## Load table including the different frame rates used to image the same sample
 df_metadata=pd.read_excel(path_to_git / 'data' / 'Preliminary_test_framerate_volume_correction.xlsx')
-## Load ecotaxa table (run script_cytosense.py) and merge to listmodes to convert scatter signals into actual size for particles not imaged
+## Load ecotaxa table (run 0_upload_thumbnails_cytosense.py) and merge to listmodes to convert scatter signals into actual size for particles not imaged
 df_metadata['Path_ecotaxa']=df_metadata.File.apply(lambda file: Path(path_to_network /'lexplore' / 'LeXPLORE' / 'ecotaxa' / file / 'ecotaxa_table_{}.tsv'.format(file)))
 df_ecotaxa=pd.concat(map(lambda file: pd.read_table(file,header=0,skiprows=range(1,2),encoding='latin-1',sep=r'\t').assign(File=file.parent.name) if file.exists() else pd.DataFrame({'File':file.parent.name},index=[0]),df_metadata.Path_ecotaxa.unique())).reset_index(drop=True)
 df_ecotaxa['Particle ID']=df_ecotaxa.object_id.astype(str).str.rsplit('_',n=1).str[1]
