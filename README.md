@@ -14,7 +14,7 @@ The objective for the project Interreg/ALGA are:
 
 4. understanding the environmental conditions leading to phytoplankton outbreaks
 
-<img clear="both" src="https://github.com/mdugenne/Lexplore_ALGA/tree/main/figures/readme/ALGA_logo.png" width="100%" style="  float:right; padding:0.7em"/>
+<img clear="both" src="https://github.com/mdugenne/Lexplore_ALGA/blob/main/figures/readme/ALGA_logo.png" width="100%" style="  float:right; padding:0.7em"/>
 
 
 
