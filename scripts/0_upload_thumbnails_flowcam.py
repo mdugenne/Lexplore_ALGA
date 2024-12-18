@@ -11,8 +11,8 @@ except:
     from scripts.funcs_image_processing import *
 
 #Digits recognition - This is obsolete as long as mosaic are saved after sorting images by capture ID
-import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
-pytesseract.pytesseract.tesseract_cmd = r'{}\AppData\Local\Programs\Tesseract-OCR\tesseract'.format(str(Path.home()))
+#import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
+#pytesseract.pytesseract.tesseract_cmd = r'{}\AppData\Local\Programs\Tesseract-OCR\tesseract'.format(str(Path.home()))
 
 matplotlib.use('Qt5Agg')
 
@@ -158,7 +158,10 @@ for sample in list(mosaicfiles.keys()):
                     colored_image_cropped= colored_image[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]
                     ##plt.figure(),plt.imshow(colored_image_cropped),plt.show()
                     if background_cropped.shape!=image_cropped.shape: # Background might need to be reshaped since the thumbnails appearing at the bottom of the mosaic are cropped off 30 pixels to avoid overlap with the text
-                        background_cropped=background_cropped[slice(None, -1*(background_cropped.shape[0]-image_cropped.shape[0]), None)]
+                        cropped_x=-1 * (background_cropped.shape[0] - image_cropped.shape[0]) if  (background_cropped.shape[0] != image_cropped.shape[0]) else None
+                        cropped_y = -1 * (background_cropped.shape[1] - image_cropped.shape[1]) if (background_cropped.shape[1] != image_cropped.shape[1]) else None
+                        background_cropped = background_cropped[ slice(None,cropped_x , None),slice(None,cropped_y , None)]
+
                     diff_image = compare_images(image_cropped,background_cropped, method='diff')
                     ##plt.figure(),plt.imshow(diff_image),plt.show()
                     edges = ski.filters.sobel(diff_image)
