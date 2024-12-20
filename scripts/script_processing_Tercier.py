@@ -60,7 +60,7 @@ for sample in list(mosaicfiles.keys()):
     if path_to_data.exists():
         df_properties_sample = pd.read_csv(path_to_data, encoding='latin-1', index_col='Capture ID')
     else:
-        df_properties_sample = pd.DataFrame(dict(zip(list(dict_properties_visual_spreadsheet.keys()), [pd.NA] * len((dict_properties_visual_spreadsheet.keys())))), index=[0])
+        continue#df_properties_sample = pd.DataFrame(dict(zip(list(dict_properties_visual_spreadsheet.keys()), [pd.NA] * len((dict_properties_visual_spreadsheet.keys())))), index=[0])
     # Load the background image to performs segmentation and re-compute morphometric properties using the same algorithm as CytoSense
     # cropping_area = df_cropping.loc['acquisitions']
     background = ski.io.imread(path_to_data.parent / 'cal_image_000001.tif', as_gray=True)  # [int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]

@@ -6,7 +6,6 @@ import skimage.morphology
 
 try:
     from funcs_image_processing import *
-
 except:
     from scripts.funcs_image_processing import *
 
@@ -46,7 +45,7 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys()):
+for sample in list(mosaicfiles.keys())[-1:]:
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -228,10 +227,14 @@ for sample in list(mosaicfiles.keys()):
 
                         # Check if particle ID should be skipped
                         if particle_id not in id_to_skip:
-                            # Measure properties
+                            # Measure properties and append to existing df_properties_sample_merged
 
                             df_properties_git = pd.concat([pd.DataFrame({'Capture ID':str(particle_id).rstrip(),'img_file_name': 'thumbnail_{}_{}.jpg'.format(str(sample_id).rstrip().replace(' ','_'), str(particle_id).rstrip()), 'Sample': sample_id.replace(' ','_'), 'nb_particles': nb_labels}, index=[particle_id]), pd.DataFrame( ski.measure.regionprops_table(label_image=largest_object.astype(int), intensity_image=colored_image_cropped, properties=['area', 'area_bbox', 'area_convex', 'area_filled','axis_major_length', 'axis_minor_length', 'axis_major_length', 'bbox', 'centroid_local','centroid_weighted_local', 'eccentricity','equivalent_diameter_area', 'extent', 'image_intensity','inertia_tensor', 'inertia_tensor_eigvals','intensity_mean', 'intensity_max', 'intensity_min','intensity_std', 'moments', 'moments_central', 'num_pixels', 'orientation', 'perimeter', 'slice'],spacing=pixel_size), index=[particle_id])], axis=1) if nb_labels > 0 else pd.DataFrame({'img_file_name': 'thumbnail_{}_{}.png'.format(str(sample_id).rstrip(), str(particle_id).rstrip()), 'Sample': sample_id, 'nb_particles': nb_labels}, index=[particle_id])
                             df_properties_sample_merged = pd.concat([df_properties_sample_merged, df_properties_git],axis=0).reset_index(drop=True)
+
+                            # Compare ellipsoid area to convex area to identify bubbles
+                            df_properties_git=df_properties_git.assign(circular_check=lambda x: 4*np.pi*x.area/(x.perimeter)**2,ellipsoidal_check=lambda x: x.area_convex/(np.pi*(x.axis_major_length/2)*(x.axis_minor_length/2)),color_check=lambda x:all(np.mean(np.mean(x.at[particle_id,'image_intensity'], axis=1), axis=0)<50) & (all(np.diff(np.mean(np.mean(x.at[particle_id,'image_intensity'], axis=1), axis=0))<10)))
+
 
                             # Split the mosaic according to the slices of rectangular regions to generate thumbnail and save
                             contour = ski.morphology.dilation(largest_object.astype(int), footprint=ski.morphology.square(3), out=None, shift_x=False, shift_y=False)
@@ -261,6 +264,10 @@ for sample in list(mosaicfiles.keys()):
             bar.update(n=1)
     # Merge the de-novo properties datatable with FlowCam data, re-format for EcoTaxa and save
     df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).rename(columns=dict(zip(df_properties_sample.columns,'Visualspreadsheet '+df_properties_sample.columns))).reset_index().astype({'Capture ID':str}).assign(Sample=sample),how='left',on=['Sample','Capture ID'])
+    #df_properties_merged= df_properties_merged.assign(circular_check=lambda x: 4*np.pi*x.area/(x.perimeter)**2,ellipsoidal_check=lambda x: x.area_convex/(np.pi*(x.axis_major_length/2)*(x.axis_minor_length/2)))
+    #df_properties_merged['color_check']=df_properties_merged.image_intensity.apply(lambda x: all(np.mean(np.mean(x, axis=1), axis=0)<70) & (all(np.diff(np.mean(np.mean(x, axis=1), axis=0))<10)))
+    #df_test= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').circular_check > 0.7) & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8) & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1)) & (df_properties_merged.set_index('Capture ID').color_check)]
+
     df_properties_all=pd.concat([df_properties_all,  df_properties_merged],axis=0).reset_index(drop=True)
     filename_ecotaxa = str(save_directory.parent / save_directory.stem.rstrip().replace(' ','_') /'ecotaxa_table_{}.tsv'.format(str(sample).rstrip()))
     df_ecotaxa = generate_ecotaxa_table(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(acq_acquisition_date=lambda x: pd.to_datetime(x.Start_Time,format='%Y-%m-%d %H:%M:%S').dt.floor('1d').dt.strftime('%Y%m%d'),Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['acq_acquisition_date','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
@@ -271,7 +278,7 @@ for sample in list(mosaicfiles.keys()):
     # Generate a project on Ecotaxa and upload successive samples
     if 'ecotaxa_'+df_metadata.loc[sample,'Ecotaxa_project'].lower()+'_projectid' not in cfg_metadata.keys():
         create_ecotaxa_project(ecotaxa_configuration=configuration,
-                               project_config={'clone of id':None, 'title': 'Lexplore_ALGA_Flowcam_{}'.format(df_metadata.loc[sample,'Ecotaxa_project'].split('_')[-1]),
+                               project_config={'clone of id':cfg_metadata['ecotaxa_lexplore_alga_flowcam_micro_projectid'], 'title': 'Lexplore_ALGA_Flowcam_{}'.format(df_metadata.loc[sample,'Ecotaxa_project'].split('_')[-1]),
                                                'instrument': 'FlowCam',
                                                'managers': [cfg_metadata['principal_investigator']]+cfg_metadata['instrument_operator'].split(' / '),
                                                'project_description': 'This dataset includes thumbnails generated by a FlowCam {}. Acquisitions are done on samples collected on a daily basis at the surface of Lake Geneva as part of the ALGA project (PI: Bastiaan Ibelings)'.format(df_metadata.loc[sample,'Ecotaxa_project'].split('_')[-1])},update_configuration=True)

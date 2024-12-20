@@ -62,6 +62,11 @@ with open(path_to_config, 'r') as config_file:
     cfg_metadata = yaml.safe_load(config_file)
 if 'ecotaxa_initial_classification_id' in cfg_metadata.keys():
     cfg_metadata['ecotaxa_initial_classification_id']=eval(cfg_metadata['ecotaxa_initial_classification_id'])
+path_to_network=Path("{}:{}".format(cfg_metadata['local_network'],os.path.sep)) # Set working directory to forel-meco
+path_to_ecotaxa_cytosense_files=Path(path_to_network /'lexplore' / 'LeXPLORE' / 'ecotaxa'  )
+path_to_ecotaxa_flowcam_files=Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data'  / 'Lexplore' / 'ecotaxa'  )
+dict_ecotaxa_types={'img_file_name':str,'object_id':str,'object_lat':float,'object_lon':float,'object_date':str,'object_time':str,'object_depth_min':float,'object_depth_max':float,'object_annotation_category':str,'object_annotation_status':str,'object_annotation_date':str,'object_annotation_time':str,'object_annotation_person_name':str,'object_annotation_person_email':str,'sample_id':str,'sample_latitude':float,'sample_longitude':float,'sample_platform':str,'sample_project':str,'sample_principal_investigator':str,'sample_depthprofile':str,'sample_storage_gear':str,'sample_fixative':str,'sample_fixative_final_concentration':float,'sample_volume_analyzed_ml':float,'sample_volume_pumped_ml':float,'sample_volume_fluid_imaged_ml':float,'sample_duration_sec':str,'acq_id':str,'acq_instrument':str,'acq_software':str,'acq_flowcell':str,'acq_objective':str,'acq_mode':str,'acq_stop_criterion':str,'acq_pumptype':str,'acq_max_width_um':float,'acq_max_height_um':float,'acq_min_diameter_um':float,'acq_max_diameter_um':float,'acq_dark_threshold':float,'acq_light_threshold':float,'acq_neighbor_distance':float,'acq_closing_iterations':float,'acq_rolling_calibration':float,'acq_flow_rate':float,'process_id':str,'process_operator':str,'process_code':str,'process_imagetype':str}
+
 import shutil # zip folder
 import re
 import time
@@ -205,10 +210,6 @@ def create_ecotaxa_project(ecotaxa_configuration=configuration,project_config={'
 
     return project_id # ID of the newly created project
 
-path_to_network=Path("{}:{}".format(cfg_metadata['local_network'],os.path.sep)) # Set working directory to forel-meco
-path_to_ecotaxa_cytosense_files=Path(path_to_network /'lexplore' / 'LeXPLORE' / 'ecotaxa'  )
-path_to_ecotaxa_flowcam_files=Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data'  / 'Lexplore' / 'ecotaxa'  )
-dict_ecotaxa_types={'img_file_name':str,'object_id':str,'object_lat':float,'object_lon':float,'object_date':str,'object_time':str,'object_depth_min':float,'object_depth_max':float,'object_annotation_category':str,'object_annotation_status':str,'object_annotation_date':str,'object_annotation_time':str,'object_annotation_person_name':str,'object_annotation_person_email':str,'sample_id':str,'sample_latitude':float,'sample_longitude':float,'sample_platform':str,'sample_project':str,'sample_principal_investigator':str,'sample_depthprofile':str,'sample_storage_gear':str,'sample_fixative':str,'sample_fixative_final_concentration':float,'sample_volume_analyzed_ml':float,'sample_volume_pumped_ml':float,'sample_volume_fluid_imaged_ml':float,'sample_duration_sec':str,'acq_id':str,'acq_instrument':str,'acq_software':str,'acq_flowcell':str,'acq_objective':str,'acq_mode':str,'acq_stop_criterion':str,'acq_pumptype':str,'acq_max_width_um':float,'acq_max_height_um':float,'acq_min_diameter_um':float,'acq_max_diameter_um':float,'acq_dark_threshold':float,'acq_light_threshold':float,'acq_neighbor_distance':float,'acq_closing_iterations':float,'acq_rolling_calibration':float,'acq_flow_rate':float,'process_id':str,'process_operator':str,'process_code':str,'process_imagetype':str}
 
 def upload_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_path):
     """
