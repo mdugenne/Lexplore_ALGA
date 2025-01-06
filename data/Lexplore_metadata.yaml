@@ -5,6 +5,8 @@ ecotaxa_initial_classification_id: '[28213, 31691, 92242, 94125, 28208, 28290, 5
   15119, 11621, 95495, 11617, 15268, 12360, 12466, 12461, 28222, 28119, 85662, 11340,
   28110, 17562, 11360, 93714, 85008, 85061, 85060, 24689, 84963, 85026, 93675, 1,
   84960, 85023, 85012, 85013, 85014, 85015, 85016, 85124, 93014, 94601, 11486]'
+ecotaxa_initial_sorting_fields : 'area=Area [squared micrometers]\r\nnb_particles=Number of particles in the foreground\r\naxis_major_length= Major ellipsoidal axis [micrometers]\r\nequivalent_diameter_area= Equivalent circular diameter [micrometers]\r\nvisualspreadsheet_circularity=Circularity\r\nvisualspreadsheet_average_blue=Average blue intensity\r\nvisualspreadsheet_average_green=Average green intensity\r\nvisualspreadsheet_average_red=Average Red intensity\r\nvisualspreadsheet_edge_gradient=Edge gradient\r\nvisualspreadsheet_elongation=Elongation\r\nvisualspreadsheet_ratio_blue_green=Blue green ratio\r\nvisualspreadsheet_ratio_red_blue=Red blue ratio\r\nvisualspreadsheet_ratio_red_green=Red green ratio\r\nvisualspreadsheet_transparency=Transparency\r\nfws_total=Total Forward Scatter [arbitrary units]\r\nsws_total=Total Sideward Scatter [arbitrary units]\r\nfly_total=Total Yellow Fluorescence [arbitrary units]\r\nflg_total=Total Green Fluorescence [arbitrary units]\r\nflo_total=Total Orange Fluorescence [arbitrary units]\r\nflr_total=Total Red Fluorescence [arbitrary units]'
+ecotaxa_lexplore_alga_cytosense_projectid: 15101
 ecotaxa_lexplore_alga_flowcam_macro_projectid: 15080
 ecotaxa_lexplore_alga_flowcam_micro_projectid: 14791
 flowcam_10x_context_file: R:\Imaging_Flowcam\Flowcam data\Lexplore\acquisitions\context_flowcam_10x_lexplore.ctx
@@ -19,7 +21,7 @@ longitude: 6.660835277777778
 pixel_size_cytosense: 0.67
 pixel_size_flowcam_10x: 0.7339
 pixel_size_flowcam_macro: 9.47
-principal_investigator: Bastiaan Ibelings
+principal_investigator: Bas Ibelings
 program: LeXPLORE
 project: ALGA
 version_cytoUSB: v6.3.3.0
