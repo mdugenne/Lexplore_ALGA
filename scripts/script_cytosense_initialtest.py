@@ -1,8 +1,8 @@
 ## Objective: This script performs a set of data processing steps on the initial test runs acquired with the CytoSense
 import pandas as pd
-from plotnine import geom_abline
+from plotnine import geom_abline, scale_y_continuous
 
-from scripts.funcs_image_processing import cfg_metadata
+from scripts.funcs_image_processing import cfg_metadata, nbss_estimates, path_to_network
 
 ## Workflow starts here:
 
@@ -10,17 +10,60 @@ from scripts.funcs_image_processing import cfg_metadata
 ## Load table including the different frame rates used to image the same sample
 df_metadata=pd.read_excel(path_to_git / 'data' / 'Preliminary_test_framerate_volume_correction.xlsx')
 ## Load ecotaxa table (run 0_upload_thumbnails_cytosense.py) and merge to listmodes to convert scatter signals into actual size for particles not imaged
-df_metadata['Path_ecotaxa']=df_metadata.File.apply(lambda file: Path(path_to_network /'lexplore' / 'LeXPLORE' / 'ecotaxa' / file / 'ecotaxa_table_{}.tsv'.format(file)))
-df_ecotaxa=pd.concat(map(lambda file: pd.read_table(file,header=0,skiprows=range(1,2),encoding='latin-1',sep=r'\t').assign(File=file.parent.name) if file.exists() else pd.DataFrame({'File':file.parent.name},index=[0]),df_metadata.Path_ecotaxa.unique())).reset_index(drop=True)
-df_ecotaxa['Particle ID']=df_ecotaxa.object_id.astype(str).str.rsplit('_',n=1).str[1]
-df_metadata['Path_listmodes']=df_metadata.File.apply(lambda file: Path(path_to_network /'lexplore' / 'LeXPLORE' / 'export files' / 'IIF' / str('Export_'+file.rsplit('_',2)[0]+' '+' '.join(file.rsplit('_',2)[1:])) / '{}_Listmode.csv'.format(file.rsplit('_',2)[0]+' '+' '.join(file.rsplit('_',2)[1:]))))
-df_listmode=pd.concat(map(lambda file: pd.read_csv(file,sep=r',',engine='python',encoding='utf-8').assign(File=file.parent.name.split('_',1)[1].replace(' ','_')) if file.exists() else pd.DataFrame({'File':file.parent.name.split('_',1)[1].replace(' ','_')},index=[0]),df_metadata.Path_listmodes.unique())).reset_index(drop=True)
-df_ecotaxa=pd.merge(df_ecotaxa.astype({'Particle ID':str,'File':str}),df_listmode.astype({'Particle ID':str,'File':str}),how='left',on=['File','Particle ID'])
+path_to_ecotaxa=list(Path(path_to_network /'lexplore' / 'LeXPLORE' / 'ecotaxa' ).rglob('ecotaxa_table_*.tsv'))
+df_ecotaxa=pd.concat(map(lambda file: pd.read_table(file,header=0,skiprows=range(1,2),encoding='latin-1',sep=r'\t').assign(File=file.parent.name) if file.exists() else pd.DataFrame({'File':file.parent.name},index=[0]),path_to_ecotaxa)).reset_index(drop=True)
+df_ecotaxa['Particle ID']=df_ecotaxa.object_id.astype(str).str.rsplit('_',n=1).str[1].str.replace('.jpg','')
+path_to_listmodes=list(Path(path_to_network /'lexplore' / 'LeXPLORE' / 'export files'  ).rglob('*_Listmode.csv'))
+path_to_listmodes=[path for path in path_to_listmodes if (('Test' not in str(path)))]# Exclude test files
+path_to_listmodes=[path for path in path_to_listmodes if ('All Imaged Particles' not in str(path.name)) | ('IIF' not in str(path.name))]# Exclude test files
+path_to_export=list(Path(r"C:\Users\dugenne\Desktop\export_cytosense\Export_2025-01-07 15h42m23").rglob('*_Listmode.csv'))
+for file in path_to_export:
+    subdir_target='IIF' if '_smart' in file.stem else 'no-IIF'
+    dir_target=path_to_network / 'lexplore' / 'LeXPLORE' / 'export files' / str(subdir_target) / str('Export_'+'_'.join(file.stem.split(' ')[0:1])+' '+file.stem.split(' ')[1]+' '+file.stem.split(' ')[2].split('_')[0])
+    if dir_target.exists():
 
+        shutil.move(file,dir_target / file.name)
+
+df_listmode=pd.concat(map(lambda file: pd.read_csv(file,sep=r',',engine='python',encoding='utf-8').assign(File=file.parent.name.split('_',1)[1].replace(' ','_')) if file.exists() else pd.DataFrame({'File':file.parent.name.split('_',1)[1].replace(' ','_')},index=[0]),path_to_listmodes)).reset_index(drop=True)
+path_to_info=list(Path(path_to_network /'lexplore' / 'LeXPLORE' / 'export files'  ).rglob('*_Info.txt'))
+path_to_info=[path for path in path_to_info if (('Test' not in str(path)))]# Exclude test files
+df_volume = pd.concat(map(lambda file: pd.read_table(file, engine='python', encoding='utf-8', sep=r'\t',names=['Variable']).assign(Value=lambda x: x.Variable.astype(str).str.split('\:|\>').str[1:].str.join('').str.strip(),Variable=lambda x: x.Variable.str.split('\:|\>').str[0]).set_index('Variable').T.rename( columns={'Volume (μL)': 'Volume_analyzed', 'Measurement duration': 'Measurement_duration'}).assign(File=file.parent.name.split('_',1)[1].replace(' ','_'))[['File','Volume_analyzed']],path_to_info))
+
+df_nbss, df_nbss_boot=nbss_estimates(df=pd.merge(df_listmode,df_volume.assign(volume=lambda x: x.Volume_analyzed.astype(float)*1e-03)[['volume','File']].drop_duplicates(),how='left',on=['File']).assign(area=lambda x: (x['FWS Length']**2)*np.pi/4), pixel_size=1, grouping_factor=['File'])
+df_nbss_images, df_nbss_boot_images=nbss_estimates(df=df_ecotaxa.assign(volume=lambda x: x.sample_volume_fluid_imaged_ml.astype(float),area=lambda x: x.object_area), pixel_size=1, grouping_factor=['File'])
+plot = (ggplot(df_nbss) +
+        geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='File'), alpha=1)+
+        geom_point(data=df_nbss_images,mapping=aes(x='size_class_mid', y='NBSS', group='Group_index'), alpha=1) +
+        labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',colour='') +
+        scale_y_log10(breaks=10 ** np.arange(np.floor(np.log10(1e-01)) - 1, np.ceil(np.log10(1e+04)), step=1),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
+        scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
+plot.show()
+path_to_listmodes=list(Path(r"C:\Users\dugenne\Desktop\export_cytosense\Export_2025-01-07 16h30m31").rglob('*_Listmode.csv'))
+df_listmode=pd.concat(map(lambda file: pd.read_csv(file,sep=r',',engine='python',encoding='utf-8').assign(File='_'.join(file.name.split('_')[0:4]).replace(' ','_')) if file.exists() else pd.DataFrame({'File':file.parent.name.split('_',1)[1].replace(' ','_')},index=[0]),path_to_listmodes)).reset_index(drop=True)
+
+df_comparison=pd.merge(df_listmode.astype({'Particle ID':str,'File':str}),df_ecotaxa.astype({'Particle ID':str,'File':str}).drop(columns=['FL Orange Length', 'FL Yellow Maximum', 'FL Green Length', 'FWS Maximum', 'FWS Total', 'FL Green Maximum', 'FL Orange Maximum', 'FL Red Length', 'FL Orange Total', 'FL Yellow Length', 'FL Red Total', 'FL Red Maximum', 'FL Yellow Total', 'FWS Length', 'SWS Maximum', 'SWS Total', 'FL Green Total', 'SWS Length']),how='left',on=['File','Particle ID'])
+df_comparison.columns=list(map(lambda str: re.sub(r'\W+', '',str).replace(' ','_'),df_comparison.columns))
+x_var,y_var='object_equivalent_diameter_area','FWS_Length'
+slope, intercept, r_value, p_value, std_err = stats.linregress(x=np.log10(df_comparison.dropna(subset=[x_var,y_var])[x_var]),y=np.log10(df_comparison.dropna(subset=[x_var,y_var])[y_var]))
+ransac = linear_model.RANSACRegressor()
+ransac.fit(np.array(np.log10(df_comparison.dropna(subset=[x_var,y_var])[x_var])).reshape(-1,1),np.log10(df_comparison.dropna(subset=[x_var,y_var])[y_var]))
+ransac.estimator_.score(np.array(np.log10(df_comparison.dropna(subset=[x_var,y_var])[x_var])).reshape(-1,1),np.log10(df_comparison.dropna(subset=[x_var,y_var])[y_var]))
+
+r_value
+plot = (ggplot(df_comparison.dropna(subset=[x_var,y_var]).assign(y=lambda x: x.eval('FWS_Length/FWS_Length95'))) +
+        geom_point(mapping=aes(x=x_var, y='FWS_Total//FWS_Length/FWS_Length95'), alpha=1)+
+        labs(x='Equivalent circular diameter ($\mu$m)',y='FWS length ($$\mu$m)', title='',colour='') +
+        scale_y_continuous(trans='log10') +
+        scale_x_continuous(trans='log10') +
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
+plot.show()
 ## Plot regression with statistics
-df_fws=df_ecotaxa.assign(Area=lambda x: x.object_area*(cfg_metadata['pixel_size_cytosense']**2),ECD=lambda x: x.object_equivalent_diameter_area*(cfg_metadata['pixel_size_cytosense'])).query('ECD<{}'.format(cfg_metadata['height_cytosense']*(pixel_size**2)/4))[['File','Particle ID','Area','ECD']+[col for col in df_ecotaxa.columns if 'SWS' in col][0:3]]
-df_fws=df_ecotaxa.assign(Area=lambda x: x.object_area*(cfg_metadata['pixel_size_cytosense']**2),ECD=lambda x: x.object_equivalent_diameter_area*(cfg_metadata['pixel_size_cytosense'])).query('ECD<{}'.format(cfg_metadata['height_cytosense']*(pixel_size**2)/4))[['File','Particle ID','Area','ECD']+[col for col in df_ecotaxa.columns if 'FWS' in col][0:3]]
-x_var='SWS Total'
+df_fws=df_ecotaxa.assign(Area=lambda x: x.object_area*(cfg_metadata['pixel_size_cytosense']**2),ECD=lambda x: x.object_equivalent_diameter_area*(cfg_metadata['pixel_size_cytosense'])).query('ECD<{}'.format(cfg_metadata['height_cytosense']*(cfg_metadata['pixel_size_cytosense']**2)/4))[['File','Particle ID','Area','ECD']+[col for col in df_ecotaxa.columns if 'SWS' in col][0:3]]
+df_fws=df_ecotaxa.assign(Area=lambda x: x.object_area*(cfg_metadata['pixel_size_cytosense']**2),ECD=lambda x: x.object_equivalent_diameter_area*(cfg_metadata['pixel_size_cytosense'])).query('ECD<{}'.format(cfg_metadata['height_cytosense']*(cfg_metadata['pixel_size_cytosense']**2)/4))[['File','Particle ID','Area','ECD']+[col for col in df_ecotaxa.columns if 'FWS' in col][0:3]]
+x_var='FWS Length'
 y_var,y_unit='ECD',r'$\mu$m'
 slope, intercept, r_value, p_value, std_err = stats.linregress(x=np.log10(df_fws.dropna()[x_var]),y=np.log10(df_fws.dropna()[y_var]))
 plot = (ggplot(data=df_fws)+
@@ -31,6 +74,7 @@ plot = (ggplot(data=df_fws)+
         scale_x_log10(breaks=10 ** np.arange(np.floor(np.log10(1e-01)) - 1, np.ceil(np.log10(1e+07)), step=1), labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int( np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l])+
         scale_y_log10()+
         theme_paper).draw(show=False)
+plot.show()
 plot.savefig(fname='{}/figures/Initial_test/cytosense_size_calibration_{}.pdf'.format(str(path_to_git),x_var.replace(' ','_')), dpi=600)
 x_var='SWS Length'
 y_var,y_unit='ECD',r'$\mu$m'

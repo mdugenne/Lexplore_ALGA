@@ -1,4 +1,7 @@
 # Objective: This script performs a set of image processing steps on images acquired with the CytoSense imaging flow cytometer
+from pickletools import uint8
+
+import numpy as np
 import pandas as pd
 from plotnine import scale_shape
 
@@ -52,6 +55,7 @@ imagefiles=dict(map(lambda file: ('_'.join(file.name.split('_')[:-1]),natsorted(
 df_properties=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
+
 for sample in list(imagefiles.keys())[::-1]:
     # Append volume estimate and analysis duration
     path_to_sample_info=imagefiles[sample][0].parent.parent / str(imagefiles[sample][0].parent.parent.name.replace('Export_','')+'_Info.txt')
@@ -68,7 +72,7 @@ for sample in list(imagefiles.keys())[::-1]:
             cytosense_processing_time_correction=df_sets.query('Set=="All Imaged Particles"').Count.values[0]/df_sets.query('Set=="IIF_large"').Count.values[0]
         else:
             cytosense_processing_time_correction =len(imagefiles[sample]) / float(df_volume_sample['Total number of particles'].values[0].lstrip())
-        df_volume_sample=df_volume_sample.assign(Volume_analyzed=lambda x: x.Volume_analyzed.astype(float)*1e-03,Volume_pumped=lambda x: x['Flow rate (μL/sec)'].astype(float)*x.Measurement_duration.astype(float)*1e-03,Volume_Fluid_imaged=lambda x: np.pi*((reg_calibration.predict(pd.DataFrame({'Flow_rate':x['Flow rate (μL/sec)'].astype(float)}))*1e-03/2)**2)*(frame_width*pixel_size*1e-03)*cfg_metadata['fps_cytosense']*x.Measurement_duration.astype(float)*1e-03).rename(columns={'Flow rate (μL/sec)':'Flow_rate'})#.assign(Volume_Fluid_imaged=lambda x:x.Volume_Fluid_imaged*cytosense_processing_time_correction*(x.Volume_analyzed/x.Volume_Fluid_imaged))
+        df_volume_sample=df_volume_sample.assign(Volume_analyzed=lambda x: x.Volume_analyzed.astype(float)*1e-03,Volume_pumped=lambda x: x['Flow rate (μL/sec)'].astype(float)*x.Measurement_duration.astype(float)*1e-03,Volume_Fluid_imaged=lambda x: np.pi*((reg_calibration.predict(pd.DataFrame({'Flow_rate':x['Flow rate (μL/sec)'].astype(float)}))*1e-03/2))*(frame_width*pixel_size*1e-03)*cfg_metadata['fps_cytosense']*x.Measurement_duration.astype(float)*1e-03).rename(columns={'Flow rate (μL/sec)':'Flow_rate'})#.assign(Volume_Fluid_imaged=lambda x:x.Volume_Fluid_imaged*cytosense_processing_time_correction*(x.Volume_analyzed/x.Volume_Fluid_imaged))
         df_volume = pd.concat([df_volume,df_volume_sample], axis=0)
     else:
         df_volume = pd.concat([df_volume,pd.DataFrame(index=[sample])],axis=0)
@@ -136,6 +140,8 @@ for sample in list(imagefiles.keys())[::-1]:
             if nb_labels>0:
                 segmented_image = ski.segmentation.watershed(elevation_map, markers)
                 #plt.figure(),plt.imshow(segmented_image, cmap=plt.cm.gray),plt.show()
+                #image=(image*0.8).astype(np.uint8)
+
 
                 labelled = measure.label(large_markers)
                 largest_object =np.isin(labelled, np.arange(0,len((np.bincount(labelled.flat)[1:])))+1) #labelled == np.argmax(np.bincount(labelled.flat)[1:])+1
@@ -170,7 +176,7 @@ for sample in list(imagefiles.keys())[::-1]:
             bar.update(n=1)
         # Generate abd save table for EcoTaxa
     filename_ecotaxa = str(save_directory /'ecotaxa_table_{}.tsv'.format(str(sample).rstrip()))
-    df_ecotaxa = generate_ecotaxa_table(df=pd.merge(pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.loc[sample].to_frame().T.assign(sample_trigger=lambda x: pd.Series(x.values[0])[pd.Series(x.values[0]).astype(str).str.contains('TRIGGER')].values[0].split('-')[0].strip().replace(' ','')).rename(columns={'Volume_analyzed':'sample_volume_analyzed_ml','Volume_pumped':'sample_volume_pumped_ml','Volume_Fluid_imaged':'sample_volume_fluid_imaged_ml','Trigger level (mV)':'sample_trigger_threshold_mv','Measurement_duration':'sample_duration_sec','Flow_rate':'sample_flow_rate'})[['sample_trigger','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_trigger_threshold_mv','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']).assign(Particle_ID=lambda x: x.img_file_name.str.rsplit('_').str[-1].str.replace('.jpg','').astype(int)),df_listmode,how='left',on='Particle_ID'), instrument='CytoSense', path_to_storage=filename_ecotaxa)
+    df_ecotaxa = generate_ecotaxa_table(df=pd.merge(pd.merge(df_properties.query('Sample=="{}"'.format(sample)),df_volume.loc[sample].to_frame().T.assign(sample_trigger=lambda x: pd.Series(x.values[0])[pd.Series(x.values[0]).astype(str).str.contains('TRIGGER')].values[0].split('-')[0].strip().replace(' ','')).rename(columns={'Volume_analyzed':'sample_volume_analyzed_ml','Volume_pumped':'sample_volume_pumped_ml','Volume_Fluid_imaged':'sample_volume_fluid_imaged_ml','Trigger level (mV)':'sample_trigger_threshold_mv','Measurement_duration':'sample_duration_sec','Flow_rate':'sample_flow_rate'})[['sample_trigger','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_trigger_threshold_mv','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']).assign(Particle_ID=lambda x: x.img_file_name.str.rsplit('_').str[-1].str.replace('.jpg','').astype(int)),df_listmode.astype({'Particle_ID':int}),how='left',on='Particle_ID'), instrument='CytoSense', path_to_storage=filename_ecotaxa)
     # Compress folder to prepare upload on Ecotaxa
     shutil.make_archive(str(save_directory), 'zip', save_directory, base_dir=None)
     # Generate a project on Ecotaxa and upload successive samples
@@ -203,7 +209,6 @@ df_nbss,df_nbss_boot=nbss_estimates(df=df_properties.assign(Sample='_'.join(file
 '''
 #Attention, grouping factor should be a string
 plot = (ggplot(df_nbss) +
-        #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
         #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
         #geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
         geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='Sample'), alpha=1)+

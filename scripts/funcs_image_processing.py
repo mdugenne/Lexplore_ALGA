@@ -379,7 +379,7 @@ from scipy import stats
 import statsmodels
 from statsmodels import formula
 from statsmodels.formula import api
-bins=np.power(2, np.arange(0, np.log2(100000) + 1 / 3, 1 / 3))  # Fixed size(micrometers) bins used for UVP/EcoPart data. See https://ecopart.obs-vlfr.fr/. 1/3 ESD increments allow to bin particle of doubled biovolume in consecutive bins. np.exp(np.diff(np.log((1/6)*np.pi*(EcoPart_extended_bins**3))))
+bins=np.power(2, np.arange(-3, np.log2(100000) + 1 / 3, 1 / 3))  # Fixed size(micrometers) bins used for UVP/EcoPart data. See https://ecopart.obs-vlfr.fr/. 1/3 ESD increments allow to bin particle of doubled biovolume in consecutive bins. np.exp(np.diff(np.log((1/6)*np.pi*(EcoPart_extended_bins**3))))
 
 df_bins = pd.DataFrame({'size_class': pd.cut(bins, bins).categories.values,  # Define bin categories (um)
                         'bin_widths': np.diff(bins),  # Define width of individual bin categories (um)

@@ -45,7 +45,7 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys())[-1:]:
+for sample in list(mosaicfiles.keys())[-2]:
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -241,20 +241,29 @@ for sample in list(mosaicfiles.keys())[-1:]:
                             contour -= largest_object.astype(int)
 
                             scale_value = 50  # size of the scale bar in microns
-                            padding = int((np.ceil(scale_value / pixel_size) + 10) / 2)
+                            padding = int((np.ceil(300 / pixel_size) + 10) / 2)
                             fig, axes = plt.subplots(1, 1)
                             ##fig.tight_layout(pad=0, h_pad=0, w_pad=-1)
                             #plt.imshow(np.lib.pad(contour, ((25, 25), (padding, padding)), constant_values=0), cmap='gray_r')
-                            plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=float( df_metadata.at[sample, 'Background_Intensity_Mean'])), cmap='gray')
+                            plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=np.mean(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)][np.invert(largest_object)])), cmap='gray')
 
                             axes.set_axis_off()
                             scalebar = AnchoredSizeBar(transform=axes.transData, size=scale_value / pixel_size,
                                                        label='{} $\mu$m'.format(scale_value), loc='lower center',
                                                        pad=0.1,
-                                                       color='white',
+                                                       color='black',
                                                        frameon=False,
                                                        fontproperties=fontprops)
                             axes.add_artist(scalebar)
+                            if df_metadata.loc[sample,'Ecotaxa_project'].lower()=='lexplore_alga_flowcam_macro':
+                                scalebar = AnchoredSizeBar(transform=axes.transData, size=300 / pixel_size,
+                                                           label='{} $\mu$m'.format(300), loc='upper center',
+                                                           pad=0.1,
+                                                           color='black',
+                                                           frameon=False,
+                                                           fontproperties=fontprops)
+
+                                axes.add_artist(scalebar)
                             # axes.set_title('Particle ID: {}'.format(str(particle_id)))
                             save_directory = Path(str(file.parent).replace('acquisitions', 'ecotaxa')).expanduser().parent / sample
                             save_directory.mkdir(parents=True, exist_ok=True)
@@ -265,8 +274,10 @@ for sample in list(mosaicfiles.keys())[-1:]:
     # Merge the de-novo properties datatable with FlowCam data, re-format for EcoTaxa and save
     df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).rename(columns=dict(zip(df_properties_sample.columns,'Visualspreadsheet '+df_properties_sample.columns))).reset_index().astype({'Capture ID':str}).assign(Sample=sample),how='left',on=['Sample','Capture ID'])
     #df_properties_merged= df_properties_merged.assign(circular_check=lambda x: 4*np.pi*x.area/(x.perimeter)**2,ellipsoidal_check=lambda x: x.area_convex/(np.pi*(x.axis_major_length/2)*(x.axis_minor_length/2)))
-    #df_properties_merged['color_check']=df_properties_merged.image_intensity.apply(lambda x: all(np.mean(np.mean(x, axis=1), axis=0)<70) & (all(np.diff(np.mean(np.mean(x, axis=1), axis=0))<10)))
-    #df_test= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').circular_check > 0.7) & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8) & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1)) & (df_properties_merged.set_index('Capture ID').color_check)]
+    #df_properties_merged['color_check']=df_properties_merged.image_intensity.apply(lambda x: all(np.mean(np.mean(x, axis=1), axis=0)<35) & (all(np.diff(np.mean(np.mean(x, axis=1), axis=0))<10)))
+    #df_properties_merged['spherical_check'] = df_properties_merged.axis_major_length/df_properties_merged.axis_minor_length
+
+    #df_test= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').spherical_check <= 1.8)  & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8)  & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1)) & (df_properties_merged.set_index('Capture ID').circular_check > 0.3) & (df_properties_merged.set_index('Capture ID').color_check)]
 
     df_properties_all=pd.concat([df_properties_all,  df_properties_merged],axis=0).reset_index(drop=True)
     filename_ecotaxa = str(save_directory.parent / save_directory.stem.rstrip().replace(' ','_') /'ecotaxa_table_{}.tsv'.format(str(sample).rstrip()))
