@@ -11,7 +11,8 @@ from skimage.util import compare_images,crop
 from skimage.color import rgb2gray
 from skimage.measure import regionprops
 import cv2
-
+import torch
+from scripts.funcs_image_utils import *
 
 # Data processing modules
 import numpy as np
@@ -19,12 +20,30 @@ import pandas as pd
 from natsort import natsorted
 from tqdm import tqdm
 from functools import reduce
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+import json
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import normalize
+from sklearn.cluster import KMeans,DBSCAN
+from sklearn.neighbors import LocalOutlierFactor
+from itertools import compress
+from sklearn.neighbors import NearestNeighbors
+
+# Web scraping:
+import urllib3
+import re
+import string
+import requests
+from bs4 import BeautifulSoup
+import urllib
+from urllib.parse import urljoin
+from requests_html import HTMLSession #pip install requests_html, lxml_html_clean
 
 # Plot modules
 import matplotlib
 matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 import matplotlib.font_manager as fm
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 fontprops = fm.FontProperties(size=14,family='serif')
@@ -32,6 +51,15 @@ import copy
 my_cmap = copy.copy(plt.colormaps.get_cmap('gray_r')) # get a copy of the gray color map
 my_cmap.set_bad(alpha=0) # set how the colormap handles 'bad' values
 import latex
+
+## interactive module
+import dash
+from dash.exceptions import PreventUpdate
+from dash import Dash,dcc, html
+from dash.dependencies import Input, Output
+import plotly.express as px
+import pandas as pd
+import base64
 
 from plotnine import *
 import plotnine
@@ -445,6 +473,22 @@ def as_float_cytosense_depth(str):
     except:
         return 0
 
+def format_id_to_skip(list_id):
+    """
+    Objective: This function format a list of consecutive or discontinuous sequences of numbers into a string to match the expected format of particle IDs to skip
+    """
+    s = e = None
+    for i in sorted(list_id):
+        if s is None:
+            s = e = i
+        elif i == e or i == e + 1:
+            e = i
+        else:
+            yield (s, e)
+            s = e = i
+    if s is not None:
+        yield (s, e)
+
 # Define a dictionary to specify the columns types returned by the region of interest properties table
 dict_cytosense_listmode={'Particle ID':'Particle_ID','FWS Length':'fws_length','FWS Total':'fws_total','FWS Maximum':'fws_max','SWS Length':'sws_length','SWS Total':'sws_total','SWS Maximum':'sws_max','FL Yellow Length':'fly_length','FL Yellow Total':'fly_total','FL Yellow Maximum':'fly_max','FL Orange Length':'flo_length','FL Orange Total':'flo_total','FL Orange Maximum':'flo_max','FL Green Length':'flg_length','FL Green Total':'flg_total','FL Green Maximum':'flg_max','FL Red Length':'flr_length','FL Red Total':'flr_total','FL Red Maximum':'flr_max'}
 dict_properties_types={'nb_particles':['[f]'], 'area':['[f]'], 'area_bbox':['[f]'],
@@ -580,3 +624,260 @@ def season(date,hemisphere):
 
     return {0:'Spring',1:'Summer',2:'Fall',3:'Winter'}[s]
 
+def properties_to_thumbnails(image,df_properties,save_directory):
+    """
+    Objective: This function generates thumbnails of region of interest based on the properties returned by image processing
+    :param image: The initial image from which regions of interest have been segmented
+    :param df_properties: A dataframe including two feature-based axis ('x' and 'y') along the local path of the corresponding images ('image_url')
+    :return: Returns the dash application
+    """
+    #scale_value = 300 if '_'.join(save_directory.parent.stem.split('_')[0:2]).lower() == 'flowcam_2m' else 50  # size of the scale bar in microns
+    pixel_size = ((df_properties.area / df_properties.num_pixels) ** 0.5).values[0]
+    #padding = int((np.ceil(scale_value / pixel_size) + 10) / 2)
+
+    for particle_id in df_properties.index.astype(str):
+        thumbnail=Image.fromarray(image[tuple(map(lambda s: slice(np.max([0,s[1].start-10]),np.min([s[1].stop+10,image.shape[s[0]]]),None),enumerate(list(df_properties.at[int(particle_id), 'slice']))))  ][slice(1, -1, None), slice(1, -1, None)])
+        #thumbnail.show()
+        save_directory.mkdir(exist_ok=True)
+        thumbnail.save(str(save_directory / 'thumbnail_particle_{}.jpg'.format(str(particle_id).rstrip())))
+
+
+def scatter_2d_images(df):
+    """
+    Objective: This function returns an interactive scatter plot rendering local images on hovering near a feature datapoint
+    :param df: A dataframe including two feature-based axis ('x' and 'y') along the local path of the corresponding images ('image_url')
+    :return: Returns the dash application
+    """
+
+    df['color']=df.color if 'color' in df.columns else 'rgb(0,0,0)'
+    df['size'] = df['size'] if 'size' in df.columns else 5
+    fig = px.scatter(df, x="x", y="y", custom_data=["images"],color='color',size='size',hover_data='images')
+
+    # Update layout and update traces
+    fig.update_layout(clickmode='event+select', xaxis=dict(showgrid=False, showline=True, linecolor='black'),
+                      yaxis=dict(showgrid=False, showline=True, linecolor='black'),
+                      plot_bgcolor='rgba(0,0,0,0)')  # type="log",
+    fig.update_traces(hoverinfo="none", hovertemplate=None)
+    app = Dash()
+
+    app.layout = html.Div(
+        [
+            dcc.Graph(id="graph_interaction", figure=fig, clear_on_unhover=True, style={'height': '90vh'}),
+            dcc.Tooltip(id="graph-tooltip"),
+
+        ]
+    )
+
+    @app.callback(
+        Output("graph-tooltip", "show"),
+        Output("graph-tooltip", "bbox"),
+        Output('graph-tooltip', 'children'),
+        Input('graph_interaction', 'hoverData'))
+    def open_url(hoverData):
+        if hoverData:
+            pt = hoverData["points"][0]
+            bbox = pt["bbox"]
+            id = pt["pointIndex"]
+            image_source =pt['customdata'][0]# df.loc[id,'images']
+            if str(image_source)!='nan':
+                # image_source=r"R:\Imaging_Flowcam\Flowcam data\Lexplore\ecotaxa\Flowcam_2mm_lexplore_wasam_20250114_2025-01-16\thumbnail_Flowcam_2mm_lexplore_wasam_20250114_2025-01-16_889.jpg"
+                img_data = base64.b64encode(open(image_source, 'rb').read()).decode('utf-8')
+                image_url = "{}{}".format("data:image/jpg;base64, ", img_data)
+                children = [html.Div([html.Img(src=image_url, style={"width": "100%"})], style={'width': '100px', 'white-space': 'normal'})]
+
+                return True, bbox, children
+        else:
+            raise PreventUpdate
+    return app
+
+# Image feature extraction functions:
+from scripts.funcs_image_utils import *
+#image_path=r"R:\Imaging_Flowcam\Flowcam data\Lexplore\cnn\input\Flowcam_2mm_lexplore_wasam_20250115_2025-01-16"
+def images_to_dataset(image_path,filter,image_extension='.jpg'):
+    images=list(Path(image_path).expanduser().rglob('*{}'.format(image_extension)))
+    if len(filter):
+        images=[image for image in images if image.stem+'.jpg' in filter.tolist()]
+    df_path=pd.DataFrame({'ID':[path.stem for path in images],'path':[str(path) for path in images]})
+    df_context.loc['context_flowcam_2mm_lexplore','pixel_size']=cfg_metadata['pixel_size_flowcam_macro']
+    df_context.loc['context_flowcam_10x_lexplore', 'pixel_size'] = cfg_metadata['pixel_size_flowcam_10x']
+    df_context.loc['context_cytosense_lexplore', 'pixel_size'] = cfg_metadata['pixel_size_cytosense']
+    df_context.loc['context_cytosense_lexplore', ['AcceptableTop','AcceptableLeft','AcceptableBottom','AcceptableRight']] = 0,0,cfg_metadata['height_cytosense'],cfg_metadata['width_cytosense']
+    id_instrument=[parent in str(Path(image_path)) for parent in [str(Path(r'{}\\Flowcam_10x'.format(Path(image_path).parent))),str(Path(r'{}\\Flowcam_2mm'.format(Path(image_path).parent))),str(Path(r"R:\lexplore\LeXPLORE\ecotaxa"))]]
+    pixel_size=df_context.loc[id_instrument, 'pixel_size'].values[0]
+    max_size = int(np.max([(df_context.loc[id_instrument].AcceptableBottom.astype(float) - df_context.loc[ id_instrument].AcceptableTop.astype(float)) * pixel_size, (df_context.loc[id_instrument].AcceptableRight.astype(float) - df_context.loc[ id_instrument].AcceptableLeft.astype(float)) * pixel_size]))  # int(np.max([(df_context.AcceptableBottom.astype(float)-df_context.AcceptableTop.astype(float))*df_context.pixel_size,(df_context.AcceptableRight.astype(float)-df_context.AcceptableLeft.astype(float))*df_context.pixel_size]))
+
+    scale_value = 300 if '_'.join(Path(image_path).stem.lower().split('_')[0:2]) == 'flowcam_2mm' else 50  # size of the scale bar in microns
+
+    return image_Dataset(df=df_path, size=max_size,scale_value=scale_value,pixel_size=pixel_size)
+
+
+
+def image_feature_dataset(image_path,filter,model_name='resnet18',layer_name = 'avgpool'):
+    model = getattr(torchvision.models, model_name)(pretrained=True)
+    layer=model._modules.get(layer_name)
+
+    model.eval()
+    return_nodes = {'flatten': 'flatten'}
+    feature_extractor = create_feature_extractor(model, return_nodes=return_nodes)
+    '''
+    features=torch.zeros(512)
+    features = []
+    def hook_features(module, input, output):
+        N, C, H, W = output.shape
+        output = output.reshape(N, C, -1)
+        features.append(output.mean(dim=2).cpu().detach().numpy())
+        return features
+    handle = model._modules.get(layer_name).register_forward_hook(hook_features)
+    '''
+    dataset =images_to_dataset(image_path,filter,image_extension='.jpg')
+    loader = torch.utils.data.DataLoader(dataset,  batch_size=1, shuffle=False, num_workers=1)
+    df_features=pd.concat([dataset.df,pd.DataFrame('feature_'+pd.Series((np.arange(1,513))).astype(str)).set_index(0).T],axis=1)
+    for i_batch, inputs in tqdm(enumerate(loader), total=len(loader)):
+        df_features.loc[i_batch,df_features.columns[np.arange(2,df_features.shape[1])]]=feature_extractor(inputs)['flatten'].squeeze().tolist()
+
+    del model
+
+    return df_features
+
+# Function to standardize taxa list using the World Register of Marine (and freshwater) Species
+def annotation_in_WORMS(hierarchy):
+    """
+    Objective: this function uses python requests to search taxonomic annotation on the World Register of Marine Sepcies (WORMS, https://www.marinespecies.org/).
+    Note: Only accepted names will be used.\n
+    :param hierarchy: Single or hierarchical taxonomic annotation to standardize with WORMS. If hierarchical taxonomic annotation, use > to separate taxonomic ranks
+    :return: dataframe with corresponding rank, domain, phylum, class, order, family, genus, functional group, Taxon url, reference, citation, and URL for the annotation
+    """
+    hierarchy_levels = re.split('[<>]',hierarchy)
+    df_hierarchy = pd.DataFrame({'EcoTaxa_hierarchy': hierarchy, 'Full_hierarchy': '', 'Rank': '', 'Type': '', 'Domain': '', 'Phylum': '','Class': '', 'Order': '', 'Family': '', 'Genus': '', 'Functional_group': '', 'WORMS_ID': '', 'Reference': '','Citation': ''}, index=[0])
+    url = 'https://www.marinespecies.org/aphia.php?p=taxlist'
+
+    for annotation in hierarchy_levels[::-1]:
+        with HTMLSession() as session:
+            data={'searchpar':'0','tName':annotation,'marine':'0','fossil':'4'}
+            # Turn marine only and extant only search off
+            #session.post('https://www.marinespecies.org/aphia.php?p=search',data=data)
+            taxon_list=session.post(url=url,data=data, headers={'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36'})
+            soup = BeautifulSoup(taxon_list.content, "lxml")
+            if len(soup.find_all(class_="list-group-item")) == 0:  # If post results in a single page:
+                if len(soup.find_all(class_="alert alert-info")) > 0:
+                    continue  # Skip current level if annotation not found
+                else:
+                    taxo_soup=soup
+                    attributes_soup=''
+                    script=''
+                    annotation_webpage_with_attributes = session.get(urljoin(taxon_list.url, '#attributes'))
+                    if annotation_webpage_with_attributes.ok:#len(list(filter(None,[id.get('id') if id.get('id') == "aphia_attributes_group_show" else id.get('href') if id.get('href') == '#attributes' else None for id in soup.findAll('a')]))) > 0:
+                        attributes_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                        script = attributes_soup.find_all('script')
+                        if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
+                            if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()])==0:
+                                attributes_soup = ''
+                                script = ''
+            else: # If post result in a list of taxa
+                search_response = pd.DataFrame({'Taxon': [item.getText() for item in soup.find_all(class_="list-group-item") if any(re.findall(r'unaccepted|uncertain|unassessed',item.getText())) == False],'Link': [item.find('a').get('href') for item in soup.find_all(class_="list-group-item") if any(re.findall(r'unaccepted|uncertain|unassessed',item.getText())) == False]})
+                if len(search_response) == 0:
+                    continue  # Skip current level if annotation not found
+                if search_response.Taxon[0].split(' ')[0].lower() not in  annotation.lower():
+                    continue  # Skip current level if search response different from level
+                else:
+
+                    status='wait'
+                    while status!='ok':
+                        annotation_webpage = session.get(urljoin(url, search_response.Link[0]),timeout=5,stream=True)
+                        status='ok' if annotation_webpage.status_code==200 else 'wait'
+                    time.sleep(5)
+                    taxo_soup = BeautifulSoup(annotation_webpage.content, 'lxml')
+                    if len(taxo_soup.find_all(class_="alert alert-info")) > 0:
+                        while status != 'ok':
+                            res = session.post(urljoin(url, search_response.Link[0]),timeout=5,stream=True)
+                            status = 'ok' if res.status_code == 200 else 'wait'
+
+                        time.sleep(5)
+                        soup = BeautifulSoup(res.content, "lxml")
+                        taxo_soup = BeautifulSoup(res.content, 'lxml')
+                        attributes_soup = ''
+                        script = ''
+                        annotation_webpage_with_attributes = session.get(urljoin(annotation_webpage.url,'#attributes'))  # get_attributes_output(url='https://www.marinespecies.org/aphia.php?p=search&adv=1',id=annotation_webpage.url.split('id=')[-1])
+                        if annotation_webpage_with_attributes.ok:#len(list(filter(None,[id.get('id') if id.get('id') == "aphia_attributes_group_show" else id.get('href') if id.get('href') == '#attributes' else None for id in taxo_soup.findAll('a')]))) > 0:  # taxo_soup.findAll('a',onclick=True)[0].get('id')=="aphia_attributes_group_show":
+                            attributes_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                            script = attributes_soup.find_all('script')
+                            if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
+                                if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()])==0:
+                                    attributes_soup = ''
+                                    script = ''
+                    else:
+                        attributes_soup=''
+                        script=''
+                        time.sleep(5)
+                        annotation_webpage_with_attributes = session.get(urljoin(annotation_webpage.url, '#attributes'),timeout=5)  # get_attributes_output(url='https://www.marinespecies.org/aphia.php?p=search&adv=1',id=annotation_webpage.url.split('id=')[-1])
+                        if annotation_webpage_with_attributes.ok:#len(list(filter(None,[id.get('id') if id.get('id') == "aphia_attributes_group_show" else id.get('href') if id.get('href') == '#attributes' else None for id in taxo_soup.findAll('a')]))) > 0:
+                            attributes_soup=BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                            script = attributes_soup.find_all('script')
+                            if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
+                                if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()])==0:
+                                    attributes_soup = ''
+            fields = [item.getText() if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else '' for item in taxo_soup.find_all(class_="col-xs-12 col-sm-4 col-lg-2 control-label")]
+            Status = re.sub(r'[' + '\n' + '\xa0' + ']', '',taxo_soup.find_all(class_="leave_image_space")[fields.index('Status')].getText()) if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
+            if Status=='' or len(re.findall(r'unaccepted', Status)) > 0: #|uncertain|unassessed
+                if 'Accepted Name' not in fields:
+                    continue
+                else:
+                    #annotation = re.sub(r'[' + '\n' + '\xa0' + ']', '', taxo_soup.find_all(class_="leave_image_space")[ fields.index('Accepted Name')].getText()) if len( taxo_soup.find_all(class_="alert alert-info")) == 0 and 'Accepted Name' in fields else annotation
+                    #data['tName'] = annotation.split(' (')[0]
+                    status = 'wait'
+                    time.sleep(5)
+                    while status!='ok':
+                        taxon_list=session.get(urljoin(url, taxo_soup.find_all(class_="leave_image_space")[ fields.index('Accepted Name')].find_all('a')[0]['href']),timeout=5,stream=True)#session.post(url=url,data=data)
+                        status = 'ok' if taxon_list.status_code == 200 else 'wait'
+                    # Transform form query into xml table and save results in dataframe
+                    time.sleep(5)
+                    soup = BeautifulSoup(taxon_list.content, "lxml")
+                    search_response = pd.DataFrame({'Taxon': [item.getText() for item in soup.find_all(class_="list-group-item") if any(re.findall(r'unaccepted|uncertain|unassessed',item.getText())) == False],
+                                                    'Link': [item.find('a').get('href') for item in soup.find_all(class_="list-group-item") if any(re.findall(r'unaccepted|uncertain|unassessed',item.getText())) == False]})
+                    if len(search_response) == 0:
+                        if len(soup.find_all(class_="alert alert-info")) > 0:
+                            continue
+                        else:
+                            taxo_soup = soup
+                            attributes_soup = ''
+                            script = ''
+                            annotation_webpage_with_attributes = session.get(urljoin(taxon_list.url, '#attributes'),stream=True)  # get_attributes_output(url='https://www.marinespecies.org/aphia.php?p=search&adv=1',id=annotation_webpage.url.split('id=')[-1])
+                            if annotation_webpage_with_attributes.ok:#len(list(filter(None,[id.get('id') if id.get('id') == "aphia_attributes_group_show" else id.get('href') if id.get('href') == '#attributes' else None for id in soup.findAll('a')]))) > 0:
+                                attributes_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                                script = attributes_soup.find_all('script')
+                                if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
+                                    if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[ 0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()]) == 0:
+                                        attributes_soup = ''
+                                        script = ''
+                    else:
+                        annotation_webpage = session.get(urljoin(url, search_response.Link[0]),timeout=5,stream=True)
+                        time.sleep(5)
+                        taxo_soup = BeautifulSoup(annotation_webpage.content, 'lxml')
+                        attributes_soup = ''
+                        annotation_webpage_with_attributes = session.get(urljoin(annotation_webpage.url, '#attributes'))  # get_attributes_output(url='https://www.marinespecies.org/aphia.php?p=search&adv=1',id=annotation_webpage.url.split('id=')[-1])
+                        if annotation_webpage_with_attributes.ok: #taxo_soup.findAll('a', onclick=True)[0].get('id') == "aphia_attributes_group_show":
+                            attributes_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                            script = attributes_soup.find_all('script')
+                            if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
+                                if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()])==0:
+                                    attributes_soup = ''
+                    fields = [item.getText() if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else '' for item in taxo_soup.find_all(class_="col-xs-12 col-sm-4 col-lg-2 control-label")]
+
+            Functional_group =[item.getText()[substring.start():]  for item in script for substring in re.finditer('Functional group', item.getText()) if 'Functional group' in item.getText()]
+            Functional_group = ';'.join([str({'Functional group':group[group.find('Functional group') + 22:[sub.start() for sub in re.finditer('&nbsp', group) if sub.start() > group.find('Functional group') + 22 and sub.start()>group.find('nodes')][0]].replace(group[[sub.start() for sub in re.finditer('&nbsp', group) if sub.start() > group.find('Functional group') + 22 ][0]:[sub.start() for sub in re.finditer('&nbsp', group) if sub.start() > group.find('nodes') + 22 ][0]],''),group.split('&nbsp;" ,state: "" ,nodes: [{ text: "<b>')[1].split('<\\/b> ')[0] :group.split('&nbsp;" ,state: "" ,nodes: [{ text: "<b>')[1].split('<\\/b> ')[1].split('&nbsp')[0]}) if group.find('&nbsp;" ,state: "" ,nodes: [{ text: "<b>')!=-1 else str({'Functional group':group[group.find('Functional group') + 22:[sub.start() for sub in re.finditer('&nbsp', group) if sub.start() > group.find('Functional group') + 22][0]]}) for group in Functional_group])
+            Type = np.where(taxo_soup.find_all(class_="leave_image_space")[1].getText().split('\n')[1] == 'Biota','Living', 'NA').tolist() if len( taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
+            dict_hierarchy = {re.sub(r'[' + string.punctuation + ']', '', level.split('\xa0')[1]): level.split('\xa0')[0] for level in taxo_soup.find_all(class_="leave_image_space")[1].getText().split('\n') if '\xa0' in level} if len( taxo_soup.find_all(class_="alert alert-info")) == 0 else dict({'': ''})
+            full_hierarchy = '>'.join([level.split('\xa0')[0] + level.split('\xa0')[1] for level in taxo_soup.find_all(class_="leave_image_space")[1].getText().split('\n') if '\xa0' in level]) if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
+            Domain = dict_hierarchy['Kingdom'] if 'Kingdom' in dict_hierarchy.keys() else ''
+            Genus = dict_hierarchy['Genus'] if 'Genus' in dict_hierarchy.keys() else ''
+            Family = dict_hierarchy['Family'] if 'Family' in dict_hierarchy.keys() else ''
+            Order = dict_hierarchy['Order'] if 'Order' in dict_hierarchy.keys() else ''
+            Class = dict_hierarchy['Class'] if 'Class' in dict_hierarchy.keys() else ''
+            Phylum = dict_hierarchy['Phylum'] if 'Phylum' in dict_hierarchy.keys() else ''
+            Rank = re.sub(r'[' + '\n' + ' ' + ']', '',taxo_soup.find_all(class_="leave_image_space")[fields.index('Rank')].getText()) if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
+            URL = re.sub(r'[' + '(' + ')' + ']', '',taxo_soup.find_all(class_="aphia_core_cursor-help")[fields.index('AphiaID')].getText()) if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
+            Original_reference = taxo_soup.find_all(class_="correctHTML")[0].getText() if len(taxo_soup.find_all(class_="correctHTML")) > 0 else ''
+            Taxonomic_citation = [re.sub(r'[' + '\n' + ' ' + ']', '', item.getText()) for item in taxo_soup.find_all(class_="col-xs-12 col-sm-8 col-lg-10 pull-left") if item.attrs['id'] == 'Citation'][0] if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
+            df_hierarchy = pd.DataFrame({'EcoTaxa_hierarchy': hierarchy,'Full_hierarchy': full_hierarchy, 'Rank': Rank,'Type': Type,'Domain': Domain,'Phylum': Phylum, 'Class': Class,'Order': Order, 'Family': Family, 'Genus': Genus,'Functional_group': Functional_group if len(Functional_group) > 0 else '','WORMS_ID': URL,'Reference': Original_reference,'Citation': Taxonomic_citation}, index=[0])
+            break
+    return df_hierarchy

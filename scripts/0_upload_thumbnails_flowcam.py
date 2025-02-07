@@ -1,6 +1,4 @@
 ## Objective: This script was written to test a set of image processing steps on Python
-import pandas as pd
-import skimage.morphology
 
 # Load modules and functions required for image processing
 
@@ -8,6 +6,7 @@ try:
     from funcs_image_processing import *
 except:
     from scripts.funcs_image_processing import *
+
 
 #Digits recognition - This is obsolete as long as mosaic are saved after sorting images by capture ID
 #import pytesseract # Use pip install pytesseract. See documentation at https://tesseract-ocr.github.io/tessdoc/Installation.html
@@ -45,7 +44,7 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys())[-2]:
+for sample in list(mosaicfiles.keys())[-1]:
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -66,6 +65,20 @@ for sample in list(mosaicfiles.keys())[-2]:
     #cropping_area = df_cropping.loc['acquisitions']
     background = ski.io.imread(path_to_data.parent/'cal_image_000001.tif' ,as_gray=True)#[int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]
     ##plt.figure(),plt.imshow(cv2.cvtColor(background, cv2.COLOR_BGR2RGB), cmap='gray'),plt.show()
+
+    # Check for particles to skip (e.g. bubbles).
+    # A line should be added manually in the summary export files to inform the particles ID (capture ID) that were manually filtered out
+    # e.g. Particle Count, 3300
+    #      Skip,[2235:2253]+[2255:2264]+[2266]
+    if df_metadata.astype({'Skip': str}).loc[sample, 'Skip'] != 'nan':
+        id_to_skip = sum(list(map(lambda id: list( np.arange(int(re.sub('\W+', '', id.split(':')[0])), int(re.sub('\W+', '', id.split(':')[1])) + 1)) if len( id.split(':')) == 2 else [int(re.sub('\W+', '', id))], df_metadata.loc[sample, 'Skip'].split(r']+['))), [])
+        # if len(id_to_skip)!=(int(df_metadata.astype({'Particle_Count':float}).loc[sample_id,'Particle_Count'])-int(df_summary_statistics.loc[sample_id,'Count'])):
+        # print('\nAttention, Number of particles to skip is different than the difference between total particle count and particle count in the "Metadata statistics table".\nSkipping run {}. Please check the summary file and data file for missing particles'.format(sample_id))
+        # continue
+    else:
+        id_to_skip = []
+    id_discarded = id_to_skip
+
     with tqdm(desc='Generating vignettes for run {}'.format(sample_id), total=len(natsorted(mosaicfiles[sample_id])), bar_format='{desc}{bar}', position=0, leave=True) as bar:
         for file in natsorted([str(file) for file in mosaicfiles[sample_id]]):
 
@@ -99,17 +112,6 @@ for sample in list(mosaicfiles.keys())[-2]:
             labelid_idx=((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')).sort_values(['bbox-1','bbox-0']).index)+1#((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')[:-4]).sort_values(['bbox-1','bbox-0']).index)+1 #label are sorted according to the x position
             ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,labelid_idx).reshape(labelled.shape),image,0), cmap='gray'),plt.show()
 
-            # Check for particles to skip (e.g. bubbles).
-            # A line should be added manually in the summary export files to inform the particles ID (capture ID) that were manually filtered out
-            # e.g. Particle Count, 3300
-            #      Skip,[2235:2253]+[2255:2264]+[2266]
-            if df_metadata.astype({'Skip':str}).loc[sample,'Skip']!='nan':
-                id_to_skip = sum(list(map(lambda id: list(np.arange(int(re.sub('\W+', '', id.split(':')[0])), int(re.sub('\W+', '', id.split(':')[1])) + 1)) if len( id.split(':')) == 2 else [int(re.sub('\W+', '', id))], df_metadata.loc[sample, 'Skip'].split(r']+['))), [])
-                #if len(id_to_skip)!=(int(df_metadata.astype({'Particle_Count':float}).loc[sample_id,'Particle_Count'])-int(df_summary_statistics.loc[sample_id,'Count'])):
-                    #print('\nAttention, Number of particles to skip is different than the difference between total particle count and particle count in the "Metadata statistics table".\nSkipping run {}. Please check the summary file and data file for missing particles'.format(sample_id))
-                    #continue
-            else:
-                id_to_skip=[]
             for id_of_interest in np.arange(0,len(rect_idx)):
                 if len(np.where(np.in1d(labelled,rect_idx[id_of_interest]).reshape(labelled.shape),image,0)[df_properties.at[rect_idx[id_of_interest]-1,'slice']][slice(1, -1, None), slice(1, -1, None)]):
                     particle_id = particle_id + 1
@@ -182,7 +184,7 @@ for sample in list(mosaicfiles.keys())[-2]:
                     # plt.figure(),plt.imshow(label_objects),plt.show()
                     # plt.figure(),plt.imshow(label_objects.astype(bool).astype(int)),plt.show()
 
-                    # Segmentation of the background in case flow cell was dirty
+                    # Segmentation of the background if flow cell was dirty
                     edges = ski.filters.sobel(background_cropped)
                     markers = np.zeros_like(background_cropped)
                     markers[edges > np.quantile(edges, 0.99)] = 1
@@ -211,6 +213,8 @@ for sample in list(mosaicfiles.keys())[-2]:
                     ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_diff, shift_x=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])]), shift_y=np.max([1,int( distance_neighbor.DistanceToNeighbor.astype(float).values[0])])), properties=['slice'])
                     if any(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int)),np.arange(1,nb_labels+1)))) > 0.80: #<
                         id_to_discard=list(np.where(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int))>0.80,np.arange(1,nb_labels+1))))[0]+1)#pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).slice.isin(pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).slice.unique()))==True]+1
+                    elif len(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.05*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0]))): # Adding a condition for object representing a small fraction (5 percent) of the total frame
+                        id_to_discard=list(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.05*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])).index+1)
                     else:
                         id_to_discard=[]
                     if len(id_to_discard):
@@ -240,16 +244,19 @@ for sample in list(mosaicfiles.keys())[-2]:
                             contour = ski.morphology.dilation(largest_object.astype(int), footprint=ski.morphology.square(3), out=None, shift_x=False, shift_y=False)
                             contour -= largest_object.astype(int)
 
-                            scale_value = 50  # size of the scale bar in microns
-                            padding = int((np.ceil(300 / pixel_size) + 10) / 2)
-                            fig, axes = plt.subplots(1, 1)
-                            ##fig.tight_layout(pad=0, h_pad=0, w_pad=-1)
+                            scale_value = 300 if df_metadata.loc[sample,'Ecotaxa_project'].lower()=='lexplore_alga_flowcam_macro' else 50 # size of the scale bar in microns
+                            padding = int((np.ceil(scale_value / pixel_size) + 10) / 2)
+                            px_res_matplotlib = 1 /300# plt.rcParams['figure.dpi']
+
+
                             #plt.imshow(np.lib.pad(contour, ((25, 25), (padding, padding)), constant_values=0), cmap='gray_r')
-                            plt.imshow(np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=np.mean(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)][np.invert(largest_object)])), cmap='gray')
+                            padded_image=np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=np.mean(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)][np.invert(largest_object)]))
+                            fig, axes = plt.subplots(1, 1, frameon=False) #figsize=tuple(np.array(padded_image.shape)[0:2][::-1]*40/300),dpi=300
+                            plt.imshow(padded_image, cmap='gray')
 
                             axes.set_axis_off()
-                            scalebar = AnchoredSizeBar(transform=axes.transData, size=scale_value / pixel_size,
-                                                       label='{} $\mu$m'.format(scale_value), loc='lower center',
+                            scalebar = AnchoredSizeBar(transform=axes.transData, size=50 / pixel_size,
+                                                       label='50 $\mu$m', loc='lower center',
                                                        pad=0.1,
                                                        color='black',
                                                        frameon=False,
@@ -257,7 +264,7 @@ for sample in list(mosaicfiles.keys())[-2]:
                             axes.add_artist(scalebar)
                             if df_metadata.loc[sample,'Ecotaxa_project'].lower()=='lexplore_alga_flowcam_macro':
                                 scalebar = AnchoredSizeBar(transform=axes.transData, size=300 / pixel_size,
-                                                           label='{} $\mu$m'.format(300), loc='upper center',
+                                                           label='300 $\mu$m', loc='upper center',
                                                            pad=0.1,
                                                            color='black',
                                                            frameon=False,
@@ -267,19 +274,84 @@ for sample in list(mosaicfiles.keys())[-2]:
                             # axes.set_title('Particle ID: {}'.format(str(particle_id)))
                             save_directory = Path(str(file.parent).replace('acquisitions', 'ecotaxa')).expanduser().parent / sample
                             save_directory.mkdir(parents=True, exist_ok=True)
-                            fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.jpg'.format(str(sample).rstrip(), str(particle_id).rstrip())),transparent=False,  bbox_inches="tight",pad_inches=0,dpi=300)
+                            fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.jpg'.format(str(sample).rstrip(), str(particle_id).rstrip())),transparent=False,  bbox_inches="tight",pad_inches=0, dpi=300)
                             plt.close('all')
+                            #Image Saving raw thumbnail for CNN feature extraction
+                            thumbnail=Image.fromarray(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)])
+                            save_raw_directory = Path(str(file.parent).replace('acquisitions', 'cnn' )).expanduser().parent /'input' / sample
+                            save_raw_directory.mkdir(parents=True, exist_ok=True)
+                            thumbnail.save(str(save_raw_directory / 'thumbnail_{}_{}.jpg'.format(str(sample).rstrip(), str(particle_id).rstrip())))
+                    else:
+                        id_discarded=id_discarded+[particle_id]
 
             bar.update(n=1)
     # Merge the de-novo properties datatable with FlowCam data, re-format for EcoTaxa and save
     df_properties_merged=pd.merge(df_properties_sample_merged,df_properties_sample.drop(columns=['Name']).rename(columns=dict(zip(df_properties_sample.columns,'Visualspreadsheet '+df_properties_sample.columns))).reset_index().astype({'Capture ID':str}).assign(Sample=sample),how='left',on=['Sample','Capture ID'])
-    #df_properties_merged= df_properties_merged.assign(circular_check=lambda x: 4*np.pi*x.area/(x.perimeter)**2,ellipsoidal_check=lambda x: x.area_convex/(np.pi*(x.axis_major_length/2)*(x.axis_minor_length/2)))
-    #df_properties_merged['color_check']=df_properties_merged.image_intensity.apply(lambda x: all(np.mean(np.mean(x, axis=1), axis=0)<35) & (all(np.diff(np.mean(np.mean(x, axis=1), axis=0))<10)))
-    #df_properties_merged['spherical_check'] = df_properties_merged.axis_major_length/df_properties_merged.axis_minor_length
-
-    #df_test= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').spherical_check <= 1.8)  & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8)  & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1)) & (df_properties_merged.set_index('Capture ID').circular_check > 0.3) & (df_properties_merged.set_index('Capture ID').color_check)]
-
     df_properties_all=pd.concat([df_properties_all,  df_properties_merged],axis=0).reset_index(drop=True)
+
+    #Check for bubbles which are too numerous with FlowCam macro to track
+    df_properties_merged= df_properties_merged.assign(circular_check=lambda x: 4*np.pi*x.area/(x.perimeter)**2,ellipsoidal_check=lambda x: x.area_convex/(np.pi*(x.axis_major_length/2)*(x.axis_minor_length/2)))
+    df_properties_merged['color_check']=df_properties_merged.image_intensity.apply(lambda x: all(np.mean(np.mean(x, axis=1), axis=0)<35) & (all(np.diff(np.mean(np.mean(x, axis=1), axis=0))<10)))
+    df_properties_merged['spherical_check'] = df_properties_merged.axis_major_length/df_properties_merged.axis_minor_length
+    df_discarded= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').spherical_check <= 1.8)  & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8)  & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1)) & (df_properties_merged.set_index('Capture ID').circular_check > 0.3) & (df_properties_merged.set_index('Capture ID').color_check)]
+    if len(df_discarded): # Looking for additional particles to discard (e.g. background particles that move with the flow of the FlowCam Macro, bubbles)
+
+        # Use features extracted to identify duplicated particles resulting from a flow random orientation
+        background_cropped = background[int(df_cropping.loc[df_cropping.index.astype(str).str.contains('_'.join(sample.split('_')[0:2]).lower()),'AcceptableTop']):int(df_cropping.loc[df_cropping.index.astype(str).str.contains('_'.join(sample.split('_')[0:2]).lower()),'AcceptableBottom']), int(df_cropping.loc[df_cropping.index.astype(str).str.contains('_'.join(sample.split('_')[0:2]).lower()),'AcceptableLeft']):int(df_cropping.loc[df_cropping.index.astype(str).str.contains('_'.join(sample.split('_')[0:2]).lower()),'AcceptableRight'])]
+        ##plt.figure(),plt.imshow(cv2.cvtColor(background_cropped, cv2.COLOR_BGR2RGB)),plt.show()
+
+        edges = ski.filters.sobel(background_cropped)
+        markers = np.zeros_like(background_cropped)
+        markers[edges > np.quantile(edges, 0.99)] = 1
+        markers[edges > (threshold.astype({'ThresholdDark': float, 'ThresholdLight': float})[['ThresholdDark', 'ThresholdLight']].min(axis=1).values / 255)] = 1
+        markers[(sp.ndimage.binary_closing(edges) == False)] = 0
+        ##plt.figure(), plt.imshow(markers, cmap='gray'), plt.show()
+        fill_image = sp.ndimage.binary_fill_holes(markers)
+        fill_image = ski.morphology.erosion(ski.morphology.erosion(ski.morphology.closing(ski.morphology.dilation(markers, mode='constant'))))
+        fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(np.max([1, int(np.floor(distance_neighbor.DistanceToNeighbor.astype(float).values[0] / pixel_size / 4))]))).astype(bool))
+        ## plt.figure(),plt.imshow(fill_image),plt.show()
+        label_objects_background, nb_labels_background = sp.ndimage.label(fill_image)
+        label_objects_background = ski.morphology.remove_small_objects(label_objects_background, min_size=float(min_esd.MinESD.values[0]) / pixel_size)
+        label_objects_background, nb_labels_background = sp.ndimage.label(label_objects_background)
+        ## plt.figure(),plt.imshow(label_objects_background),plt.show()
+        df_background_properties=pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects_background,properties=['image_filled','area', 'area_bbox', 'area_convex', 'area_filled','axis_major_length', 'axis_minor_length', 'axis_major_length','bbox', 'centroid_local', 'eccentricity', 'equivalent_diameter_area', 'extent', 'inertia_tensor', 'inertia_tensor_eigvals', 'moments', 'moments_central', 'num_pixels','orientation', 'perimeter', 'slice'], spacing=pixel_size))
+        properties_to_thumbnails(image=background_cropped, df_properties=df_background_properties, save_directory=save_raw_directory/ 'Background')
+
+        # t-SNE clustering of raw image features
+        #df_features=pd.read_csv(r"C:\Users\dugenne\Desktop\pca.csv")
+        df_features = image_feature_dataset(image_path=save_raw_directory,filter=df_properties_merged.img_file_name, model_name='resnet18', layer_name='avgpool')
+        model_cluster = TSNE(n_components=3)
+        df_projection = pd.DataFrame(model_cluster.fit_transform(pd.DataFrame(normalize(df_features[df_features.columns[np.arange(2,df_features.shape[1])]]))))
+        df_projection['image_url']=df_features.path
+        # clustering outliers
+        neighbors = NearestNeighbors(n_neighbors=12)
+        neighbors_fit = neighbors.fit(df_projection[[1,2]].to_numpy())
+        distances, indices = neighbors_fit.kneighbors(df_projection[[1,2]].to_numpy())
+
+        dbscan = DBSCAN(eps=0.97, min_samples=2,leaf_size=2)
+        cluster=dbscan.fit(df_projection[[1,2]].to_numpy())
+        lof = LocalOutlierFactor(n_neighbors=10)
+        lof.fit_predict(df_projection[[1,2]].to_numpy())
+        df_projection['score']=lof.negative_outlier_factor_
+        df_projection['cluster']=cluster.labels_
+        ##scatter_2d_images(df_projection.assign(color=lambda x:x.cluster.astype(str).isin(['0']),size=lambda x:np.where(x.score<-1.5,30,4)).rename(columns={2:'x',1:'y','image_url':'images'})).run_server( use_reloader=False)
+        if any(df_projection.score<-2):
+            df_discarded = pd.merge(df_properties_merged, df_projection.assign(img_file_name=df_projection.image_url.apply(lambda path: Path(path).stem+'.jpg')),how='left',on='img_file_name')
+            df_outliers=df_discarded.query('cluster!=0')
+            id_discarded = id_discarded + natsorted(df_outliers['Capture ID'].astype(int).tolist()+list(filter(None,list(map(lambda id: (int(id)+1) if ((np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture X'])-int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])<=np.max(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture X'])<np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture X'])+int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])) &  (np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture Y'])-int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])<=np.max(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture Y'])<np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture Y'])+int(distance_neighbor.DistanceToNeighbor.astype(float).values[0]))) else (int(id)-1) if ((np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture X'])-int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])<=np.max(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture X'])<np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture X'])+int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])) &  (np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture Y'])-int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])<=np.max(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture Y'])<np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture Y'])+int(distance_neighbor.DistanceToNeighbor.astype(float).values[0]))) else None,df_outliers['Capture ID'])))))
+            #df_test=df_properties_merged[df_properties_merged['Capture ID'].isin(list(map(str,natsorted(id_discarded))))]
+
+    id_discarded = natsorted(np.unique(id_discarded + list(compress(list(np.arange(1, particle_id + 1)),pd.Series(np.arange(1, particle_id + 1)).astype(str).isin(df_properties_merged['Capture ID'].unique()) == False))))
+
+    if len(id_discarded):
+        # Add skipped id to summary file for reproducibility
+        with Path(str(path_to_data).replace('.csv','_summary.csv')).open(mode='a') as file:
+            file.write(r'{}'.format('Skip,'+eval(repr('+'.join(['[%d]' % s if s == e else '[%d:%d]' % (s, e) for (s, e) in format_id_to_skip(natsorted(pd.Series(id_discarded).astype(int).tolist()))])))))
+        # Erase outlier images and remove id from properties table to discard in ecotaxa table
+        for image in  '{}thumbnail_{}_'.format(str(save_directory )+os.sep,str(sample).rstrip()) + pd.Series( list(map(str,id_discarded)) )+'.jpg':
+            Path(image).unlink(missing_ok=True)
+        df_properties_merged=df_properties_merged[df_properties_merged['Capture ID'].astype(str).isin(list(map(str,id_discarded)))==False].reset_index(drop=True)
+
     filename_ecotaxa = str(save_directory.parent / save_directory.stem.rstrip().replace(' ','_') /'ecotaxa_table_{}.tsv'.format(str(sample).rstrip()))
     df_ecotaxa = generate_ecotaxa_table(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(acq_acquisition_date=lambda x: pd.to_datetime(x.Start_Time,format='%Y-%m-%d %H:%M:%S').dt.floor('1d').dt.strftime('%Y%m%d'),Sample_Volume_Processed=lambda x: x.Sample_Volume_Processed.str.replace(' ml','').astype(float),Sample_Volume_Aspirated=lambda x: x.Sample_Volume_Aspirated.str.replace(' ml','').astype(float),Fluid_Volume_Imaged=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float),Flow_Rate=lambda x:x.Flow_Rate.str.replace(' ml/min','').astype(float)).rename(columns={'Sample_Volume_Processed':'sample_volume_analyzed_ml','Sample_Volume_Aspirated':'sample_volume_pumped_ml','Fluid_Volume_Imaged':'sample_volume_fluid_imaged_ml','Sampling_Time':'sample_duration_sec','Flow_Rate':'sample_flow_rate'})[['acq_acquisition_date','sample_volume_analyzed_ml','sample_volume_pumped_ml','sample_volume_fluid_imaged_ml','sample_duration_sec','sample_flow_rate']],how='left',right_index=True,left_on=['Sample']), instrument='FlowCam', path_to_storage=filename_ecotaxa)
 
