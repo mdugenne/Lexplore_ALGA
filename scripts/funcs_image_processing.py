@@ -651,6 +651,8 @@ def scatter_2d_images(df):
 
     df['color']=df.color if 'color' in df.columns else 'rgb(0,0,0)'
     df['size'] = df['size'] if 'size' in df.columns else 5
+    df['img_url'] = df.images.apply(lambda image_source:html.Img("{}{}".format("data:image/jpg;base64, ",base64.b64encode(open(image_source, 'rb').read()).decode('utf-8'))).to_plotly_json())
+
     fig = px.scatter(df, x="x", y="y", custom_data=["images"],color='color',size='size',hover_data='images')
 
     # Update layout and update traces

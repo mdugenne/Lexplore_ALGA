@@ -1,4 +1,5 @@
 ## Objective: This script was written to test a set of image processing steps on Python
+from plotnine import scale_colour_manual
 
 # Load modules and functions required for image processing
 
@@ -328,7 +329,7 @@ for sample in list(mosaicfiles.keys())[-1]:
         neighbors_fit = neighbors.fit(df_projection[[1,2]].to_numpy())
         distances, indices = neighbors_fit.kneighbors(df_projection[[1,2]].to_numpy())
 
-        dbscan = DBSCAN(eps=0.97, min_samples=2,leaf_size=2)
+        dbscan = DBSCAN(eps=0.97, min_samples=12,leaf_size=2)
         cluster=dbscan.fit(df_projection[[1,2]].to_numpy())
         lof = LocalOutlierFactor(n_neighbors=10)
         lof.fit_predict(df_projection[[1,2]].to_numpy())
@@ -374,18 +375,21 @@ for sample in list(mosaicfiles.keys())[-1]:
 
 # Plot the Normalized Biovolume Size Spectra
 #Attention, grouping factor should be a string
+#df_nbss=pd.concat(map(lambda path_ecotaxa:nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').assign(instrument=lambda x:np.where(x.sample_id.str.contains('Flowcam_2mm'),'FlowCam Macro','FlowCam Micro')).drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0],natsorted(list(save_directory.parent.rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
+#df_nbss=pd.concat(map(lambda path_ecotaxa:nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').assign(instrument="CytoSense").drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0],natsorted(list(Path(path_to_network / 'lexplore' / 'LEXPLORE' / 'ecotaxa' ).rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
 plot = (ggplot(df_nbss) +
         #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
         #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
         #geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
-        geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='Sample'), alpha=1)+
+        geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='instrument'), alpha=1)+
+        scale_colour_manual(values={'FlowCam Micro':'#{:02x}{:02x}{:02x}'.format(255,212,42),'FlowCam Macro':'#{:02x}{:02x}{:02x}'.format(152,95,95),'CytoSense':'#{:02x}{:02x}{:02x}'.format(76,95,95)})+
         labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',colour='') +
         scale_y_log10(breaks=10 ** np.arange(np.floor(np.log10(1e-01)) - 1, np.ceil(np.log10(1e+04)), step=1),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
         scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
         guides(colour=None,fill=None)+
         theme_paper).draw(show=False)
 plot.show()
-plot.savefig(fname='{}/figures/Initial_test/flowcam_10x_nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
+plot.savefig(fname='{}/figures/Initial_test/nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 # Plot the sizes comparison
 plot = (ggplot(df_properties_all.assign(instrument=lambda x: x.Sample.str.split('_').str[0:2].str.join('_'))) +
         geom_point(mapping=aes(x='equivalent_diameter_area', y='Visualspreadsheet Diameter (ABD)',fill='instrument'),size=0.1, alpha=1) +  #
