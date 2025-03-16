@@ -1,8 +1,6 @@
 ## Objective: This script was written to test a set of image processing steps on Python
-from plotnine import scale_colour_manual
 
 # Load modules and functions required for image processing
-
 try:
     from funcs_image_processing import *
 except:
@@ -19,7 +17,7 @@ matplotlib.use('Qt5Agg')
 #Workflow starts here
 
 # Load metadata files (volume imaged, background pixel intensity, etc.) and save entries into separate tables (metadata and statistics)
-metadatafiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data').expanduser().rglob('Flowcam_*_lexplore*/*_summary.csv')))
+metadatafiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions').expanduser().rglob('Flowcam_*_lexplore*/*_summary.csv')))
 metadatafiles=list(filter(lambda element: element.parent.parent.stem not in ['Tests','Blanks'],metadatafiles)) # Discard test and blank acquisitions
 df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name.replace(' ','_')})),df:=df[[col for col in df.columns if col in summary_metadata_columns]])[-1],metadatafiles),axis=0)
 df_metadata=df_metadata.assign(Ecotaxa_project=lambda x: x.index.astype(str).str.lower().str.split('_').str[0:2].str.join('_').map({'flowcam_10x':'Lexplore_ALGA_Flowcam_micro','flowcam_2mm':'Lexplore_ALGA_Flowcam_macro'}),Instrument='FlowCam')
@@ -45,12 +43,10 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in list(mosaicfiles.keys())[-1]:
+for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))[-40:-9]:
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
-    if path_to_ecotaxa.exists():
-        continue
     df_properties_sample_merged=pd.DataFrame()
     particle_id = 0
     # Reset flow rate in metadat based on context file
@@ -214,8 +210,10 @@ for sample in list(mosaicfiles.keys())[-1]:
                     ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_diff, shift_x=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])]), shift_y=np.max([1,int( distance_neighbor.DistanceToNeighbor.astype(float).values[0])])), properties=['slice'])
                     if any(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int)),np.arange(1,nb_labels+1)))) > 0.80: #<
                         id_to_discard=list(np.where(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int))>0.80,np.arange(1,nb_labels+1))))[0]+1)#pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).slice.isin(pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).slice.unique()))==True]+1
-                    elif len(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.05*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0]))): # Adding a condition for object representing a small fraction (5 percent) of the total frame
+                    elif (len(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.05*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])))) | all(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).values==ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0]): # Adding a condition for object representing a small fraction (5 percent) of the total frame or the entire frame
                         id_to_discard=list(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.05*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])).index+1)
+                        id_to_discard=id_to_discard+list(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter=={}'.format(ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])).index+1)
+
                     else:
                         id_to_discard=[]
                     if len(id_to_discard):
@@ -251,7 +249,7 @@ for sample in list(mosaicfiles.keys())[-1]:
 
 
                             #plt.imshow(np.lib.pad(contour, ((25, 25), (padding, padding)), constant_values=0), cmap='gray_r')
-                            padded_image=np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=np.mean(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)][np.invert(largest_object)]))
+                            padded_image=np.lib.pad(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)], ((25, 25), (padding, padding), (0, 0)), 'constant', constant_values=np.nanmean(colored_image[df_properties.at[rect_idx[id_of_interest] - 1, 'slice']][slice(1, -1, None), slice(1, -1, None)][np.invert(largest_object)]))
                             fig, axes = plt.subplots(1, 1, frameon=False) #figsize=tuple(np.array(padded_image.shape)[0:2][::-1]*40/300),dpi=300
                             plt.imshow(padded_image, cmap='gray')
 
@@ -291,10 +289,11 @@ for sample in list(mosaicfiles.keys())[-1]:
     df_properties_all=pd.concat([df_properties_all,  df_properties_merged],axis=0).reset_index(drop=True)
 
     #Check for bubbles which are too numerous with FlowCam macro to track
-    df_properties_merged= df_properties_merged.assign(circular_check=lambda x: 4*np.pi*x.area/(x.perimeter)**2,ellipsoidal_check=lambda x: x.area_convex/(np.pi*(x.axis_major_length/2)*(x.axis_minor_length/2)))
-    df_properties_merged['color_check']=df_properties_merged.image_intensity.apply(lambda x: all(np.mean(np.mean(x, axis=1), axis=0)<35) & (all(np.diff(np.mean(np.mean(x, axis=1), axis=0))<10)))
-    df_properties_merged['spherical_check'] = df_properties_merged.axis_major_length/df_properties_merged.axis_minor_length
-    df_discarded= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').spherical_check <= 1.8)  & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8)  & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1)) & (df_properties_merged.set_index('Capture ID').circular_check > 0.3) & (df_properties_merged.set_index('Capture ID').color_check)]
+    df_properties_merged= df_properties_merged.assign(circular_check=lambda x: 4*np.pi*x.area/(x.perimeter)**2,ellipsoidal_check=lambda x: x.area_convex/(np.pi*(x.axis_major_length/2)*(np.maximum(x.axis_minor_length,1)/2)))
+    df_properties_merged['color_check']=df_properties_merged.image_intensity.apply(lambda x: all(np.mean(np.mean(x, axis=1), axis=0)<55) & (all(np.diff(np.mean(np.mean(x, axis=1), axis=0))<10)))
+    df_properties_merged['spherical_check'] = df_properties_merged.axis_major_length/np.maximum(df_properties_merged.axis_minor_length,1)
+    df_pca=pd.concat([pd.concat([df_properties_merged[['circular_check','ellipsoidal_check','spherical_check']],df_properties_merged.image_intensity.apply(lambda x: pd.Series(np.mean(np.mean(x, axis=1), axis=0)))],axis=1),df_properties_merged.image_intensity.apply(lambda x: pd.Series(np.diff(np.mean(np.mean(x, axis=1), axis=0))))],axis=1)
+    df_discarded= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').spherical_check <= 1.1)  & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8)  & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1))  & (df_properties_merged.set_index('Capture ID').color_check) & (df_properties_merged.set_index('Capture ID').circular_check > 0.5)] #
     if len(df_discarded): # Looking for additional particles to discard (e.g. background particles that move with the flow of the FlowCam Macro, bubbles)
 
         # Use features extracted to identify duplicated particles resulting from a flow random orientation
@@ -319,7 +318,6 @@ for sample in list(mosaicfiles.keys())[-1]:
         properties_to_thumbnails(image=background_cropped, df_properties=df_background_properties, save_directory=save_raw_directory/ 'Background')
 
         # t-SNE clustering of raw image features
-        #df_features=pd.read_csv(r"C:\Users\dugenne\Desktop\pca.csv")
         df_features = image_feature_dataset(image_path=save_raw_directory,filter=df_properties_merged.img_file_name, model_name='resnet18', layer_name='avgpool')
         model_cluster = TSNE(n_components=3)
         df_projection = pd.DataFrame(model_cluster.fit_transform(pd.DataFrame(normalize(df_features[df_features.columns[np.arange(2,df_features.shape[1])]]))))
@@ -346,6 +344,13 @@ for sample in list(mosaicfiles.keys())[-1]:
 
     if len(id_discarded):
         # Add skipped id to summary file for reproducibility
+        with Path(str(path_to_data).replace('.csv','_summary.csv')).open(mode='r') as f:
+            lines = f.readlines()
+        if any(pd.Series(lines).str.startswith('Skip')):
+            with Path(str(path_to_data).replace('.csv', '_summary.csv')).open(mode='w') as f:
+                for line in pd.Series(lines)[pd.Series(lines).str.startswith('Skip')==False].to_list():
+                    f.write(line)
+
         with Path(str(path_to_data).replace('.csv','_summary.csv')).open(mode='a') as file:
             file.write(r'{}'.format('Skip,'+eval(repr('+'.join(['[%d]' % s if s == e else '[%d:%d]' % (s, e) for (s, e) in format_id_to_skip(natsorted(pd.Series(id_discarded).astype(int).tolist()))])))))
         # Erase outlier images and remove id from properties table to discard in ecotaxa table
@@ -375,8 +380,8 @@ for sample in list(mosaicfiles.keys())[-1]:
 
 # Plot the Normalized Biovolume Size Spectra
 #Attention, grouping factor should be a string
-#df_nbss=pd.concat(map(lambda path_ecotaxa:nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').assign(instrument=lambda x:np.where(x.sample_id.str.contains('Flowcam_2mm'),'FlowCam Macro','FlowCam Micro')).drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0],natsorted(list(save_directory.parent.rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
-#df_nbss=pd.concat(map(lambda path_ecotaxa:nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').assign(instrument="CytoSense").drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0],natsorted(list(Path(path_to_network / 'lexplore' / 'LEXPLORE' / 'ecotaxa' ).rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
+#df_nbss=pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument=lambda x:np.where(x.sample_id.str.contains('Flowcam_2mm'),'FlowCam Macro','FlowCam Micro')),natsorted(list(save_directory.parent.rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
+#df_nbss=pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument="CytoSense"),natsorted(list(Path(path_to_network / 'lexplore' / 'LEXPLORE' / 'ecotaxa' ).rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
 plot = (ggplot(df_nbss) +
         #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
         #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
