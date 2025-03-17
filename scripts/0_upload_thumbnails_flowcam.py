@@ -1,4 +1,4 @@
-## Objective: This script was written to test a set of image processing steps on Python
+## Objective: This script process and upload thumbnails acquired by a FlowCam instrument (Visualspreadsheet v.5) on Ecotaxa to build image training sets
 
 # Load modules and functions required for image processing
 try:
@@ -13,7 +13,7 @@ except:
 
 matplotlib.use('Qt5Agg')
 
-# Identification of the variables of interest in visualspreadsheet summary tables
+
 #Workflow starts here
 
 # Load metadata files (volume imaged, background pixel intensity, etc.) and save entries into separate tables (metadata and statistics)
@@ -43,7 +43,7 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))[-40:-9]:
+for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*')))))):
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -380,13 +380,16 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(Pa
 
 # Plot the Normalized Biovolume Size Spectra
 #Attention, grouping factor should be a string
+save_directory = Path(cfg_metadata['flowcam_10x_context_file'].replace('acquisitions', 'ecotaxa')).expanduser().parent / 'sample_id'
 #df_nbss=pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument=lambda x:np.where(x.sample_id.str.contains('Flowcam_2mm'),'FlowCam Macro','FlowCam Micro')),natsorted(list(save_directory.parent.rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
-#df_nbss=pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument="CytoSense"),natsorted(list(Path(path_to_network / 'lexplore' / 'LEXPLORE' / 'ecotaxa' ).rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
+#df_nbss=pd.concat([df_nbss,pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument="CytoSense"),natsorted(list(Path(path_to_network / 'lexplore' / 'LEXPLORE' / 'ecotaxa' ).rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})],axis=0)
 plot = (ggplot(df_nbss) +
         #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
         #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
         #geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
-        geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='instrument'), alpha=1)+
+        stat_summary(mapping=aes(x='size_class_mid', y='NBSS',group='instrument',fill='instrument'),geom='pointrange',alpha=0.7,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
+
+        #geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='instrument'), alpha=1)+
         scale_colour_manual(values={'FlowCam Micro':'#{:02x}{:02x}{:02x}'.format(255,212,42),'FlowCam Macro':'#{:02x}{:02x}{:02x}'.format(152,95,95),'CytoSense':'#{:02x}{:02x}{:02x}'.format(76,95,95)})+
         labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',colour='') +
         scale_y_log10(breaks=10 ** np.arange(np.floor(np.log10(1e-01)) - 1, np.ceil(np.log10(1e+04)), step=1),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +

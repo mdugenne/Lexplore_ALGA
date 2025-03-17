@@ -139,6 +139,43 @@ plot.set_size_inches(12, 4.5)
 plot.show()
 plot.savefig(fname='{}/figures/ola/ts_all_{}.pdf'.format(str(path_to_git), variable), dpi=300, bbox_inches='tight')
 
+#Compare with flowcam ALGA data
+# Plot time-series
+save_directory = Path(cfg_metadata['flowcam_10x_context_file'].replace('acquisitions', 'ecotaxa')).expanduser().parent / 'sample_id'
+df_nbss=pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument=lambda x:np.where(x.sample_id.str.contains('Flowcam_2mm'),'FlowCam Macro','FlowCam Micro')),natsorted(list(save_directory.parent.rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
+df_nbss=pd.concat([df_nbss,pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument="CytoSense"),natsorted(list(Path(path_to_network / 'lexplore' / 'LEXPLORE' / 'ecotaxa' ).rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})],axis=0)
+
+df_summary_nbss=df_nbss.query('instrument=="FlowCam Micro"').assign(biomass=lambda x: 1e-03*(10**-0.933)*(x.NBSS*x.range_size_bin)**0.881).groupby('Sample').biomass.sum().reset_index().assign(sampling_date=lambda x:pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'))
+
+plot = (ggplot(df_summary_nbss) +
+       # stat_summary(data=df_summary.assign(timestamp=pd.to_datetime('2025-'+df_summary.sampling_datetime.dt.strftime('%m-%d'))),mapping=aes(x='timestamp',y='total_biomass',group='timestamp'),geom='pointrange')+
+       # geom_area(data=df_summary.assign(timestamp=pd.to_datetime('2025-' +df_summary.sampling_datetime.dt.strftime('%m-%d'))),
+       #              mapping=aes(x='timestamp', y='total_biomass')) +
+        geom_bar(data=pd.concat([df_summary.sampling_datetime,df_summary[taxa].cumsum(axis=1)],axis=1).assign(
+            timestamp=pd.to_datetime('2025-' + df_summary.sampling_datetime.dt.strftime('%m-%d'))).groupby(['timestamp'])['Zygnematophyceae'].mean().reset_index(),
+                  mapping=aes(x='timestamp', y='Zygnematophyceae'),stat='identity',fill=palette_taxa['Zygnematophyceae'],alpha=.6) +
+        geom_bar(data=pd.concat([df_summary.sampling_datetime,df_summary[taxa].cumsum(axis=1)],axis=1).assign(
+            timestamp=pd.to_datetime('2025-' + df_summary.sampling_datetime.dt.strftime('%m-%d'))).groupby(['timestamp'])['Bacillariophyceae'].mean().reset_index(),
+                  mapping=aes(x='timestamp', y='Bacillariophyceae'),stat='identity',fill=palette_taxa['Bacillariophyceae'],alpha=1) +
+        geom_bar(data=pd.concat([df_summary.sampling_datetime,df_summary[taxa].cumsum(axis=1)],axis=1).assign(
+            timestamp=pd.to_datetime('2025-' + df_summary.sampling_datetime.dt.strftime('%m-%d'))).groupby(['timestamp'])['Chrysophyceae'].mean().reset_index(),
+                  mapping=aes(x='timestamp', y='Chrysophyceae'),stat='identity',fill=palette_taxa['Chrysophyceae'],alpha=1) +
+        geom_bar(data=pd.concat([df_summary.sampling_datetime,df_summary[taxa].cumsum(axis=1)],axis=1).assign(
+            timestamp=pd.to_datetime('2025-' + df_summary.sampling_datetime.dt.strftime('%m-%d'))).groupby(['timestamp'])['Cyanophyceae'].mean().reset_index(),
+                  mapping=aes(x='timestamp', y='Cyanophyceae'),stat='identity',fill=palette_taxa['Cyanophyceae'],alpha=1) +
+        geom_line(mapping=aes(x='sampling_date',y='biomass'))+
+
+        labs(x='',y='Total biomass ($\mu$g L$^{-1}$)', title='',colour='') +
+        scale_x_date(limits=[pd.to_datetime('2025-01-01'),pd.to_datetime('2025-12-15')])+
+        scale_y_sqrt() +
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
+plot.set_size_inches(12, 4.5)
+plot.show()
+plot.savefig(fname='{}/figures/ola/ts_all_biomass_with_flowcam.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
+
+
+
 df_zoo=pd.read_csv(path_datafiles[4],sep=';',decimal=',',encoding='latin-1',engine='python')
 df_zoo.columns=['project', 'site', 'plateform','sampling_date', 'sampling_gear', 'measurement', 'depth_min', 'depth_max','technician', 'biovolume', 'taxa','stage','varaible','concentration']
 df_zoo['datetime']=pd.to_datetime(df_zoo['sampling_date'],format='%d/%m/%Y')

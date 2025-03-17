@@ -97,7 +97,7 @@ dict_ecotaxa_types={'img_file_name':str,'object_id':str,'object_lat':float,'obje
 
 import shutil # zip folder
 import re
-import time
+import time,datetime
 path_to_config_logon = path_to_git / 'data' / 'datafiles' / 'Lexplore_configuration_logon.yaml'
 with open(path_to_config_logon, 'r') as config_file:
     cfg_logon = yaml.safe_load(config_file)
@@ -116,8 +116,11 @@ from ecotaxa_py_client.models.import_req import ImportReq
 from ecotaxa_py_client.models.taxon_model import TaxonModel
 from ecotaxa_py_client.models.user_model_with_rights import UserModelWithRights
 from ecotaxa_py_client.api import objects_api
+from ecotaxa_py_client.models.body_export_object_set_object_set_export_post import BodyExportObjectSetObjectSetExportPost
 from ecotaxa_py_client.models.project_filters import ProjectFilters
 from ecotaxa_py_client.models.historical_classification import HistoricalClassification
+from ecotaxa_py_client.models.export_req import ExportReq
+from ecotaxa_py_client.api import jobs_api
 
 ## Step 1: Create an API instance based on authentication infos.
 with ecotaxa_py_client.ApiClient() as client:
@@ -387,6 +390,106 @@ def update_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_pa
                     # and update progress bar
                     progress = bar.update(n=1)
         return project_id  # ID of the newly updated project
+
+def export_ecotaxa_project_table(ecotaxa_configuration=configuration,project_id=int(cfg_metadata['ecotaxa_lexplore_alga_flowcam_micro_projectid']),export_path=Path(cfg_metadata['flowcam_10x_context_file'].replace('acquisitions', 'ecotaxa')).parent):
+    """
+      Objective: This function uses default option to export datatables on Ecotaxa (https://ecotaxa.obs-vlfr.fr)
+      :param configuration: An API instance specifying the host (Ecotaxa url) and the token generated based on Ecotaxa credentials
+      :param project_id: The ID of the existing Ecotaxa project.
+      :param export_path: The storage directory
+      """
+
+    BASE_URL = "https://ecotaxa.obs-vlfr.fr"
+    # Step 1 : Access project according to the info in project_id and configuration
+    with ecotaxa_py_client.ApiClient(ecotaxa_configuration) as api_client:
+        # Create an object instance of the API class
+        api_instance = objects_api.ObjectsApi(api_client)
+        body_export_object_set_object_set_export_post = BodyExportObjectSetObjectSetExportPost(
+            filters=ProjectFilters(),
+            # ProjectFilters(statusfilter="PVD") for Predicted, Validated, dubious. Leave empty to get unclassified ROI
+            # get P(redicted), V(alidated), D(ubious) images. Check other options for filter here: https://github.com/ecotaxa/ecotaxa_py_client/blob/main/docs/ProjectFilters.md
+            request=ExportReq(project_id=project_id,  # the unique project ID of interest (integer)
+                              exp_type="TSV",
+                              use_latin1=False,
+                              tsv_entities="OPASH",
+                              # entities to be exported: O(bjects), P(rocess), A(cquisition), S(ample), classification H(istory)
+                              split_by="",  # no split=single table with all images/objects
+                              coma_as_separator=False,  # set decimal separator to point
+                              format_dates_times=False,
+                              with_images=False,  # exporting images
+                              with_internal_ids=False,
+                              only_first_image=False,
+                              sum_subtotal="A",
+                              out_to_ftp=False)
+        )
+    # Step 2: Generate a job/task (=Export Object Set)
+    try:
+        api_jobresponse = api_instance.export_object_set(body_export_object_set_object_set_export_post)
+    except ecotaxa_py_client.ApiException as e:
+        print("Exception when calling ObjectsApi->export_object_set: %s\n" % e)
+
+    # Report job ID. You may check the job created here: https://ecotaxa.obs-vlfr.fr/Jobs/listall
+    job_id = api_jobresponse.job_id
+    api_jobinstance = jobs_api.JobsApi(api_client)
+    print("Creating export file with job ID: ", job_id, sep=' ')
+
+    # Necessary break between step 3 and 4
+    # Insert a progress bar to allow for the job to be done based on get_job status.
+    # Attention, the break cannot be timed with job progress=(percentage) due to a small temporal offset between job progress and status
+    with tqdm(desc='Working on project {} export'.format(str(project_id)), total=1000, bar_format='{desc}{bar}', position=0, leave=True) as bar:
+        job_status = 'R'  # percent = 0
+        while job_status not in ('F', 'E'):  # percent!=100:
+            time.sleep(2)  # Check the job status every 2 seconds. Modify as needed
+            thread = api_jobinstance.get_job(job_id)
+
+            job_status = thread.state
+            percent = thread.progress_pct
+            bar.set_description("Working on project {} export %s%%".format(str(project_id)) % percent, refresh=True)
+            # and update progress bar
+            ok = bar.update(n=10)
+            if job_status == 'F':
+                break
+            if job_status == 'E':
+                print("Error creating job. Please check your connection or EcoTaxa server")
+    # Step 3: Get/Download export zipfile
+    zip_file = "ecotaxa_export_{}_{}Z.zip".format(str(project_id), datetime.datetime.utcnow().strftime("%Y%m%d"))  # "ecotaxa_{}".format(str(result.result['out_file']))
+    path_to_zip = Path(export_path).expanduser() / zip_file
+    path_to_log = Path(export_path).expanduser() / "job_{}.log".format(str(job_id))
+    print("\nExporting file ", zip_file, " to ", export_path, ", please wait", sep='')
+
+    with requests.Session() as sess:
+        url = BASE_URL + "/api/jobs/%d/file" % job_id
+        rsp = sess.get(url, headers={"Authorization": "Bearer " + ecotaxa_configuration.access_token}, stream=True)
+        with open(path_to_zip, "wb") as fd:
+            for a_chunk in rsp.iter_content():  # Loop over content, i.e. eventual HTTP chunks
+                # rsp.raise_for_status()
+                fd.write(a_chunk)
+
+    print("Download completed: ", path_to_zip, "\nUnpacking zip file", sep='')
+    shutil.unpack_archive(path_to_zip, export_path)  # Unzip export file
+    path_to_zip.unlink(missing_ok=True)  # Delete zip file
+    path_to_log.unlink(missing_ok=True)  # Delete job log
+
+def check_ecotaxa_annotations(ecotaxa_configuration=configuration,project_id=str(cfg_metadata['ecotaxa_lexplore_alga_flowcam_micro_projectid'])):
+    """
+      Objective: This function checks all taxonomic categories used in set(s) of Ecotaxa project(s) (https://ecotaxa.obs-vlfr.fr)
+      :param configuration: An API instance specifying the host (Ecotaxa url) and the token generated based on Ecotaxa credentials
+      :param project_id: The ID of the existing Ecotaxa project. For multiple projects, use comma for separation
+      :return: A dataframe with taxa ID and corresponding names
+      """
+    BASE_URL = "https://ecotaxa.obs-vlfr.fr"
+    # Step 1 : Access project according to the info in project_id and configuration
+    with ecotaxa_py_client.ApiClient(ecotaxa_configuration) as api_client:
+        api_instance = ecotaxa_py_client.ProjectsApi(api_client)
+        try:
+            api_response = api_instance.project_set_get_stats(project_id)
+            df_annotations=pd.DataFrame({'taxon':list(itertools.chain(*list(map(lambda stats: stats.used_taxa,api_response))))}).drop_duplicates(subset='taxon').reset_index(drop=True)
+            api_instance = ecotaxa_py_client.TaxonomyTreeApi(api_client)
+            df_annotations['EcoTaxa_hierarchy']=list(map(lambda taxon_id: api_instance.get_taxon_in_central(int(taxon_id))[0].display_name if taxon_id>0 else '',df_annotations.taxon))
+        except:
+            print('Error extracting project taxonomic categories. Check internet connexion and project ID')
+    return df_annotations
+
 
 
 
