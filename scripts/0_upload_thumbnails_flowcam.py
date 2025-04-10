@@ -43,7 +43,8 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*')))))):
+natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))
+for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*')))))))):
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -290,12 +291,12 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(Pa
 
     #Check for bubbles which are too numerous with FlowCam macro to track
     df_properties_merged= df_properties_merged.assign(circular_check=lambda x: 4*np.pi*x.area/(x.perimeter)**2,ellipsoidal_check=lambda x: x.area_convex/(np.pi*(x.axis_major_length/2)*(np.maximum(x.axis_minor_length,1)/2)))
-    df_properties_merged['color_check']=df_properties_merged.image_intensity.apply(lambda x: all(np.mean(np.mean(x, axis=1), axis=0)<55) & (all(np.diff(np.mean(np.mean(x, axis=1), axis=0))<10)))
+    df_properties_merged['color_check']=df_properties_merged.image_intensity.apply(lambda x: all(np.mean(np.mean(x, axis=1), axis=0)<85) & (all(np.diff(np.mean(np.mean(x, axis=1), axis=0))>-3)))
     df_properties_merged['spherical_check'] = df_properties_merged.axis_major_length/np.maximum(df_properties_merged.axis_minor_length,1)
-    df_pca=pd.concat([pd.concat([df_properties_merged[['circular_check','ellipsoidal_check','spherical_check']],df_properties_merged.image_intensity.apply(lambda x: pd.Series(np.mean(np.mean(x, axis=1), axis=0)))],axis=1),df_properties_merged.image_intensity.apply(lambda x: pd.Series(np.diff(np.mean(np.mean(x, axis=1), axis=0))))],axis=1)
-    df_discarded= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').spherical_check <= 1.1)  & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8)  & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1))  & (df_properties_merged.set_index('Capture ID').color_check) & (df_properties_merged.set_index('Capture ID').circular_check > 0.5)] #
+    df_pca=pd.concat([pd.concat([df_properties_merged.set_index('Capture ID')[['circular_check','ellipsoidal_check','spherical_check','color_check']],df_properties_merged.set_index('Capture ID').image_intensity.apply(lambda x: pd.Series(np.mean(np.mean(x, axis=1), axis=0)))],axis=1),df_properties_merged.set_index('Capture ID').image_intensity.apply(lambda x: pd.Series(np.diff(np.mean(np.mean(x, axis=1), axis=0))))],axis=1)
+    df_discarded= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').spherical_check <= 1.5)  & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8)  & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1))  & (df_properties_merged.set_index('Capture ID').color_check) ] # & (df_properties_merged.set_index('Capture ID').circular_check > 0.6)
     if len(df_discarded): # Looking for additional particles to discard (e.g. background particles that move with the flow of the FlowCam Macro, bubbles)
-
+        id_discarded=id_discarded+df_discarded.index.astype(int).tolist()
         # Use features extracted to identify duplicated particles resulting from a flow random orientation
         background_cropped = background[int(df_cropping.loc[df_cropping.index.astype(str).str.contains('_'.join(sample.split('_')[0:2]).lower()),'AcceptableTop']):int(df_cropping.loc[df_cropping.index.astype(str).str.contains('_'.join(sample.split('_')[0:2]).lower()),'AcceptableBottom']), int(df_cropping.loc[df_cropping.index.astype(str).str.contains('_'.join(sample.split('_')[0:2]).lower()),'AcceptableLeft']):int(df_cropping.loc[df_cropping.index.astype(str).str.contains('_'.join(sample.split('_')[0:2]).lower()),'AcceptableRight'])]
         ##plt.figure(),plt.imshow(cv2.cvtColor(background_cropped, cv2.COLOR_BGR2RGB)),plt.show()
@@ -318,27 +319,38 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(Pa
         properties_to_thumbnails(image=background_cropped, df_properties=df_background_properties, save_directory=save_raw_directory/ 'Background')
 
         # t-SNE clustering of raw image features
+        save_features_directory = Path(str(save_raw_directory).replace('input', 'output')).expanduser()
+        save_features_directory.parent.mkdir(exist_ok=True)
         df_features = image_feature_dataset(image_path=save_raw_directory,filter=df_properties_merged.img_file_name, model_name='resnet18', layer_name='avgpool')
+        df_features=df_features.copy()[df_features.ID.astype(str).isin(df_properties_merged.img_file_name.str.replace('.jpg','').unique())].reset_index(drop=True)
+        df_features.to_csv(str(save_features_directory)+'_features.csv',index=False)
         model_cluster = TSNE(n_components=3)
         df_projection = pd.DataFrame(model_cluster.fit_transform(pd.DataFrame(normalize(df_features[df_features.columns[np.arange(2,df_features.shape[1])]]))))
         df_projection['image_url']=df_features.path
-        # clustering outliers
-        neighbors = NearestNeighbors(n_neighbors=12)
-        neighbors_fit = neighbors.fit(df_projection[[1,2]].to_numpy())
-        distances, indices = neighbors_fit.kneighbors(df_projection[[1,2]].to_numpy())
-
-        dbscan = DBSCAN(eps=0.97, min_samples=12,leaf_size=2)
-        cluster=dbscan.fit(df_projection[[1,2]].to_numpy())
+        df_projection.rename(columns={ 'image_url': 'images'}).to_csv(str(save_features_directory)+'.csv',index=False)
+        # Check projected outlier images
+        try:
+            os.system('start cmd /K python {}/scripts/funcs_image_utils.py {} 0 1'.format(str(path_to_git),r'"{}"'.format(str(save_features_directory)+'.csv')))#scatter_2d_images(df_directory=str(save_features_directory)+'.csv').run_server( use_reloader=False,debug=False)
+        except:
+            print('')
+        dbscan = DBSCAN(eps=0.95, min_samples=5, leaf_size=12)
+        cluster = dbscan.fit(df_projection[[1,2]].to_numpy())
         lof = LocalOutlierFactor(n_neighbors=10)
         lof.fit_predict(df_projection[[1,2]].to_numpy())
-        df_projection['score']=lof.negative_outlier_factor_
-        df_projection['cluster']=cluster.labels_
-        ##scatter_2d_images(df_projection.assign(color=lambda x:x.cluster.astype(str).isin(['0']),size=lambda x:np.where(x.score<-1.5,30,4)).rename(columns={2:'x',1:'y','image_url':'images'})).run_server( use_reloader=False)
-        if any(df_projection.score<-2):
+        df_projection['score'] = lof.negative_outlier_factor_
+        df_projection['cluster'] = cluster.labels_
+        df_projection = df_projection.assign(color=lambda x: x.cluster.astype(str).isin(['0']),size=lambda x: np.where(x.score < -1.7, 30, 4))
+
+        if any(df_projection.score<-2): ## Add outliers ID to discarded particle list
             df_discarded = pd.merge(df_properties_merged, df_projection.assign(img_file_name=df_projection.image_url.apply(lambda path: Path(path).stem+'.jpg')),how='left',on='img_file_name')
             df_outliers=df_discarded.query('cluster!=0')
             id_discarded = id_discarded + natsorted(df_outliers['Capture ID'].astype(int).tolist()+list(filter(None,list(map(lambda id: (int(id)+1) if ((np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture X'])-int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])<=np.max(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture X'])<np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture X'])+int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])) &  (np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture Y'])-int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])<=np.max(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture Y'])<np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)+1)]),'Visualspreadsheet Capture Y'])+int(distance_neighbor.DistanceToNeighbor.astype(float).values[0]))) else (int(id)-1) if ((np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture X'])-int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])<=np.max(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture X'])<np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture X'])+int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])) &  (np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture Y'])-int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])<=np.max(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture Y'])<np.min(df_discarded.loc[df_discarded['Capture ID'].isin([id,str(int(id)-1)]),'Visualspreadsheet Capture Y'])+int(distance_neighbor.DistanceToNeighbor.astype(float).values[0]))) else None,df_outliers['Capture ID'])))))
             #df_test=df_properties_merged[df_properties_merged['Capture ID'].isin(list(map(str,natsorted(id_discarded))))]
+
+        particle_id_check=pd.Series(list(save_directory.glob('thumbnail_*.jpg'))).astype(str).str.split('_').str[-1].str.replace('.jpg','')
+        # Add particles that were manually removed as a final check
+        if any(df_properties_merged['Capture ID'].isin(particle_id_check.unique())==False):
+            id_discarded = natsorted(np.unique(id_discarded +list(df_properties_merged.loc[df_properties_merged['Capture ID'].isin(particle_id_check.unique())==False,'Capture ID'].astype(int).unique())))
 
     id_discarded = natsorted(np.unique(id_discarded + list(compress(list(np.arange(1, particle_id + 1)),pd.Series(np.arange(1, particle_id + 1)).astype(str).isin(df_properties_merged['Capture ID'].unique()) == False))))
 
