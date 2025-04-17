@@ -1,4 +1,5 @@
 ## Objective: This script process and upload thumbnails acquired by a FlowCam instrument (Visualspreadsheet v.5) on Ecotaxa to build image training sets
+import pandas as pd
 
 # Load modules and functions required for image processing
 try:
@@ -17,7 +18,7 @@ matplotlib.use('Qt5Agg')
 #Workflow starts here
 
 # Load metadata files (volume imaged, background pixel intensity, etc.) and save entries into separate tables (metadata and statistics)
-metadatafiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions').expanduser().rglob('Flowcam_*_lexplore*/*_summary.csv')))
+metadatafiles=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'acquisitions').expanduser().glob('Flowcam_*_lexplore*/*_summary.csv')))
 metadatafiles=list(filter(lambda element: element.parent.parent.stem not in ['Tests','Blanks'],metadatafiles)) # Discard test and blank acquisitions
 df_metadata=pd.concat(map(lambda file:(df:=pd.read_csv(file,sep=r'\t',engine='python',encoding='latin-1',names=['Name','Value']),df:=df.Name.str.split(r'\,',n=1,expand=True).rename(columns={0:'Name',1:'Value'}),df:=df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True) ,(df:=df.assign(Name=lambda x: x.Name.str.replace('========','').str.replace(' ','_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename(index={'Value':file.parent.name.replace(' ','_')})),df:=df[[col for col in df.columns if col in summary_metadata_columns]])[-1],metadatafiles),axis=0)
 df_metadata=df_metadata.assign(Ecotaxa_project=lambda x: x.index.astype(str).str.lower().str.split('_').str[0:2].str.join('_').map({'flowcam_10x':'Lexplore_ALGA_Flowcam_micro','flowcam_2mm':'Lexplore_ALGA_Flowcam_macro'}),Instrument='FlowCam')
@@ -43,7 +44,7 @@ mosaicfiles=dict(map(lambda file: (file.name,natsorted(list(file.rglob('collage_
 df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
-natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))
+natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))[::-1]
 for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*')))))))):
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
@@ -171,7 +172,7 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(ma
                     #markers[edges > np.quantile(edges, 0.85)] = 1
                     markers[(sp.ndimage.binary_closing(edges) == False)] = 0
                     ##plt.figure(), plt.imshow(markers, cmap='gray'), plt.show()
-                    fill_image = ski.morphology.erosion(ski.morphology.erosion(ski.morphology.closing(ski.morphology.dilation(markers,mode='constant'))))
+                    fill_image = ski.morphology.erosion(ski.morphology.erosion(ski.morphology.closing(ski.morphology.dilation(markers,mode='constant')))) #
                     distance_neighbor=df_context.loc[df_context.index.str.replace('context_','').str.contains('_'.join(sample.lower().split('_')[0:3])),['DistanceToNeighbor']]
                     fill_image = ski.morphology.remove_small_holes(ski.morphology.closing(fill_image, ski.morphology.square(np.max([1,int(np.floor(distance_neighbor.DistanceToNeighbor.astype(float).values[0]/pixel_size/4))]))).astype(bool)) # int(np.floor(int(df_context.DistanceToNeighbor.astype(float).values[0]) / pixel_size))
                     ##plt.figure(), plt.imshow(fill_image, cmap='gray'), plt.show()
@@ -211,7 +212,7 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(ma
                     ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_diff, shift_x=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])]), shift_y=np.max([1,int( distance_neighbor.DistanceToNeighbor.astype(float).values[0])])), properties=['slice'])
                     if any(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int)),np.arange(1,nb_labels+1)))) > 0.80: #<
                         id_to_discard=list(np.where(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int))>0.80,np.arange(1,nb_labels+1))))[0]+1)#pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).slice.isin(pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).slice.unique()))==True]+1
-                    elif (len(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.05*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])))) | all(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).values==ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0]): # Adding a condition for object representing a small fraction (5 percent) of the total frame or the entire frame
+                    elif (len(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.2*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])))) | all(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).values==ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0]): # Adding a condition for object representing a small fraction (5 percent) of the total frame or the entire frame
                         id_to_discard=list(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.05*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])).index+1)
                         id_to_discard=id_to_discard+list(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter=={}'.format(ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])).index+1)
 
@@ -410,7 +411,17 @@ plot = (ggplot(df_nbss) +
         theme_paper).draw(show=False)
 plot.show()
 plot.savefig(fname='{}/figures/Initial_test/nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
-# Plot the sizes comparison
+#Plot total abundance
+plot = (ggplot(df_nbss.groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))) +
+        facet_wrap('~instrument',ncol=1,scales='free')+
+        geom_line(mapping=aes(x='datetime', y='NBSS'),size=.3, alpha=1) +  #
+        labs(x='',y='Total abundance (particles per L$^{-1}$ or mL$^{-1}$)', title='',colour='') +
+        scale_y_log10(limits=[1,10000],breaks=np.multiply(10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape(int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1),np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        scale_x_date(limits=[datetime.date(2024,12,1),datetime.date(2025,12,31)]) +
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
+plot.show()
+# Plot size comparisons
 plot = (ggplot(df_properties_all.assign(instrument=lambda x: x.Sample.str.split('_').str[0:2].str.join('_'))) +
         geom_point(mapping=aes(x='equivalent_diameter_area', y='Visualspreadsheet Diameter (ABD)',fill='instrument'),size=0.1, alpha=1) +  #
         geom_abline(slope=1,intercept=0)+
