@@ -210,14 +210,16 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(ma
                     # Discard objects with same bounding box plus/minus neighbor pixels
                     ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_objects,shift_x=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])]),shift_y=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])])), properties=['slice'])
                     ski.measure.regionprops_table(label_image=ski.morphology.dilation(label_diff, shift_x=np.max([1,int(distance_neighbor.DistanceToNeighbor.astype(float).values[0])]), shift_y=np.max([1,int( distance_neighbor.DistanceToNeighbor.astype(float).values[0])])), properties=['slice'])
-                    if any(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int)),np.arange(1,nb_labels+1)))) > 0.80: #<
+                    if any(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int))> 0.80,np.arange(1,nb_labels+1)))) : #<
                         id_to_discard=list(np.where(list(map(lambda object:ski.measure.intersection_coeff(np.isin(label_objects,object).astype(bool).astype(int), label_diff.astype(bool).astype(int))>0.80,np.arange(1,nb_labels+1))))[0]+1)#pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects, properties=['slice'])).index[(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['slice'])).slice.isin(pd.DataFrame( ski.measure.regionprops_table(label_image=label_diff, properties=['slice'])).slice.unique()))==True]+1
-                    elif (len(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.2*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])))) | all(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).values==ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0]): # Adding a condition for object representing a small fraction (5 percent) of the total frame or the entire frame
-                        id_to_discard=list(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.05*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])).index+1)
-                        id_to_discard=id_to_discard+list(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter=={}'.format(ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])).index+1)
-
                     else:
                         id_to_discard=[]
+
+                    if (len(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.2*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])))>0) | all(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).values==ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0]): # Adding a condition for object representing a small fraction (5 percent) of the total frame or the entire frame
+                        id_to_discard=id_to_discard+list(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter<{}'.format(0.2*ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])).index+1)
+                        id_to_discard=id_to_discard+list(pd.DataFrame(ski.measure.regionprops_table(label_image=label_objects,properties=['perimeter'])).query('perimeter=={}'.format(ski.measure.regionprops_table(label_image=image_cropped.astype(bool).astype(int),properties=['perimeter'])['perimeter'][0])).index+1)
+
+
                     if len(id_to_discard):
                         label_objects[np.in1d(label_objects,id_to_discard).reshape(label_objects.shape)]=0
                     # plt.figure(),plt.imshow(label_objects),plt.show()
@@ -389,7 +391,7 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(ma
 
     # Generate Normalized Biovolume Size Spectra
     df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float))[['volume']],how='left',right_index=True,left_on=['Sample']), pixel_size=1, grouping_factor=['Sample']) # Set pixel size to 1 since pixel units were already converted to metric units
-    df_nbss=pd.concat([df_nbss,df_nbss_sample],axis=0).reset_index(drop=True)
+    df_nbss=pd.concat([df_nbss.assign(instrument=lambda x: np.where(x.instrument.isna(),'FlowCam Micro',x.instrument)),df_nbss_sample],axis=0).reset_index(drop=True)
 
 # Plot the Normalized Biovolume Size Spectra
 #Attention, grouping factor should be a string
@@ -412,12 +414,12 @@ plot = (ggplot(df_nbss) +
 plot.show()
 plot.savefig(fname='{}/figures/Initial_test/nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 #Plot total abundance
-plot = (ggplot(df_nbss.groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))) +
+plot = (ggplot(df_nbss.query('Sample.str.contains("Flowcam")').groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))) +
         facet_wrap('~instrument',ncol=1,scales='free')+
         geom_line(mapping=aes(x='datetime', y='NBSS'),size=.3, alpha=1) +  #
         labs(x='',y='Total abundance (particles per L$^{-1}$ or mL$^{-1}$)', title='',colour='') +
         scale_y_log10(limits=[1,10000],breaks=np.multiply(10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape(int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1),np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
-        scale_x_date(limits=[datetime.date(2024,12,1),datetime.date(2025,12,31)]) +
+        scale_x_date(date_breaks='1 month',date_labels='%b',limits=[datetime.date(2024,12,1),datetime.date(2025,12,31)]) +
         guides(colour=None,fill=None)+
         theme_paper).draw(show=False)
 plot.show()

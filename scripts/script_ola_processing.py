@@ -36,8 +36,8 @@ df_env['Season']=pd.Categorical(df_env.season,["Winter","Spring","Summer","Fall"
 df_env['month']=df_env.datetime.dt.strftime('%m')
 
 for variable, legend in {'Temperature':r'$\text{Temperature (}^{\degree})$C',
-                         'Nitrates': r'$\text{NO}_{3-} \text{ concentration (mg L}^{-1})$',
-                         'Orthophosphates': r'$\text{PO}_{4}^{3-} \text{ concentration (mg L}^{-1})$',
+                         'Nitrates': r'$\text{NO}_{3-} \text{ concentration (mg/L)$',
+                         'Orthophosphates': r'$\text{PO}_{4}^{3-} \text{ concentration (mg/L)}$',
                          'Silice': r'$\text{SiO}_{2} \text{ concentration (mg L}^{-1}$)'}.items():
     # Long-term environmental timeseries
     plot = (ggplot(df_env.query('depth_min<10').dropna(subset=[variable])) +
@@ -49,14 +49,24 @@ for variable, legend in {'Temperature':r'$\text{Temperature (}^{\degree})$C',
     plot.show()
     plot.savefig(fname='{}/figures/ola/ts_all_{}.pdf'.format(str(path_to_git),variable), dpi=300, bbox_inches='tight')
     # Climatology
-    plot = (ggplot(df_env.query('depth_min<10').dropna(subset=[variable])) +
+    plot = (ggplot(df_env[df_env.datetime.dt.year>2020].query('(depth_min==5)').dropna(subset=[variable])) +
             stat_summary(mapping=aes(x='month', y=variable,group='month'),geom='pointrange') +
-            labs(y=legend, x='', title='', colour='') +
+            labs(y=legend, x='Month', title='', colour='') +
             guides(colour=None, fill=None) +
             theme_paper + theme(text=element_text(size=22))).draw(show=False)
-    plot.set_size_inches(4, 4.5)
+    plot.set_size_inches(6, 4.5)
     plot.show()
     plot.savefig(fname='{}/figures/ola/climatology_{}.pdf'.format(str(path_to_git), variable), dpi=300, bbox_inches='tight')
+    # Depth profile
+    plot = (ggplot(df_env[df_env.datetime.dt.year>2020].dropna(subset=[variable]).query('(month=="05")').groupby(['depth_min'])[variable].agg(['mean','std']).reset_index()) +
+            geom_pointrange(mapping=aes(x='depth_min', y='mean',ymax='mean+std',ymin='mean-std')) +
+            coord_flip()+scale_x_reverse()+scale_y_log10()+
+            labs(y=legend, x='Depth (m)', title='', colour='') +
+            guides(colour=None, fill=None) +
+            theme_paper + theme(text=element_text(size=22))).draw(show=False)
+    plot.set_size_inches(6, 4.5)
+    plot.show()
+    plot.savefig(fname='{}/figures/ola/profile_{}.pdf'.format(str(path_to_git), variable), dpi=300, bbox_inches='tight')
 
 df_phyto=pd.read_csv(path_datafiles[1],sep=';',decimal=',',encoding='latin-1',engine='python')
 df_phyto.columns=['project', 'site', 'plateform','sampling_date', 'sampling_gear', 'measurement', 'depth_min', 'depth_max','technician', 'volume', 'count_surface', 'taxa','biovolume_concentration']

@@ -19,8 +19,9 @@ from scipy import ndimage as ndi
 from skan import Skeleton
 from skued import nfold, diffread #conda install scikit-ued
 import matplotlib
+from plotnine import *
 
-from scripts.script_processing_Tercier import pixel_size
+from scripts.funcs_image_processing import theme_paper
 
 matplotlib.use('Qt5Agg')
 import warnings
@@ -235,3 +236,9 @@ for sample in np.arange(len(imagefile_chlfield)):
     # Save dataframe:
     df_sample=df_rois.assign(site=imagefile_chlfield[sample].parent.stem.split('_')[0],sample=imagefile_chlfield[sample].parent.stem,sample_datetime=pd.to_datetime(imagefile_chlfield[sample].parent.stem.split('_')[1],format='%y%m%d'))[['site','sample','sample_datetime']+list(df_rois.columns)]
     df_survey=pd.concat([df_survey,df_sample],axis=0).reset_index(drop=True)
+df_survey.to_csv(str(imagefile_chlfield[sample].parent.parent / 'timeseries_cytation_auto_segmentation.csv'),index=False)
+# Plot timeseries
+plot=(ggplot(df_survey.groupby(['sample_datetime'])[['chl_individual_number','dapi_individual_number']].sum().reset_index())+
+scale_y_continuous(trans='sqrt')+labs(x='',y='Number of chl-positive individuals x100 (Percentage of infection)')+theme_paper+
+geom_line(mapping=aes(x='sample_datetime',y='chl_individual_number/100'),color='red')+geom_point(mapping=aes(x='sample_datetime',y='100*(dapi_individual_number/chl_individual_number)'),color='blue')).draw(show=False)
+plot.show()
