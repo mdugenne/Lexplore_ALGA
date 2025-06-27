@@ -16,7 +16,7 @@ matplotlib.use('Qt5Agg')
 
 # Identification of the variables of interest in visualspreadsheet summary tables
 # Workflow starts here
-path_to_network=Path('F:\Tercier') #Reset network path to local storage
+path_to_network=Path('F:\Tercier\A repasser') #Reset network path to local storage
 # Load metadata files (volume imaged, background pixel intensity, etc.) and save entries into separate tables (metadata and statistics)
 metadatafiles = natsorted(list( Path(path_to_network).expanduser().rglob('*_summary.csv')))
 df_metadata = pd.concat(map(lambda file: (df := pd.read_csv(file, sep=r'\t', engine='python', encoding='latin-1', names=['Name', 'Value']),df := df.Name.str.split(r'\,', n=1, expand=True).rename(columns={0: 'Name', 1: 'Value'}),df := df.query('not Name.str.contains(r"\:|End",case=True)').drop(index=[0]).dropna().reset_index(drop=True), (df := df.assign(Name=lambda x: x.Name.str.replace('========', '').str.replace(' ', '_').str.strip('_'),Value=lambda x: x.Value.str.lstrip(' ')).set_index('Name').T.rename( index={'Value': file.parent.name.replace(' ', '_')})),df := df[[col for col in df.columns if col in summary_metadata_columns]])[-1], metadatafiles), axis=0)
@@ -37,19 +37,19 @@ df_cropping = df_context[['AcceptableTop', 'AcceptableBottom', 'AcceptableLeft',
 
 runfiles = natsorted(list(Path(path_to_network / 'acquisitions').expanduser().glob('*')))
 # Search for mosaic files (all starting with ***collage***) in local data storage repository
-mosaicfiles = dict(map(lambda file: (file.name, natsorted(list(file.rglob('mosaic_*.png')))), runfiles))
+mosaicfiles = dict(map(lambda file: (file.name, natsorted(list(file.rglob('image*.png')))), runfiles))
 df_context=df_context_flowcam_micro
 # Loop through sample to (1) generate thumbnails, (2) ecotaxa tables, (3) upload on Ecotaxa, (4) compute Normalized Biovolume Size Spectrum:
 df_properties_all = pd.DataFrame()
 df_volume = pd.DataFrame()
 df_nbss = pd.DataFrame()
-for sample in list(mosaicfiles.keys()):
-    df_excel = pd.read_excel(path_to_network / 'outputs' / 'Flowcam_recap_filtre_taille.xlsx', sheet_name='New')
+for sample in natsorted(list(mosaicfiles.keys()))[8:]:
+    df_excel = pd.read_excel(path_to_network.parent / 'outputs' / 'Flowcam_recap_filtre_taille.xlsx', sheet_name='New')
     sample_id = sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
-    path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'outputs')).expanduser().parent
-    if path_to_ecotaxa.exists():
-        continue
+    path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('A repasser', 'outputs')).expanduser().parent
+    #if path_to_ecotaxa.exists():
+    #    continue
     df_properties_sample_merged = pd.DataFrame()
     particle_id = 0
     # Reset flow rate in metadat based on context file
@@ -59,8 +59,8 @@ for sample in list(mosaicfiles.keys()):
 
     if path_to_data.exists():
         df_properties_sample = pd.read_csv(path_to_data, encoding='latin-1', index_col='Capture ID')
-    else:
-        continue#df_properties_sample = pd.DataFrame(dict(zip(list(dict_properties_visual_spreadsheet.keys()), [pd.NA] * len((dict_properties_visual_spreadsheet.keys())))), index=[0])
+    #else:
+    #    continue#df_properties_sample = pd.DataFrame(dict(zip(list(dict_properties_visual_spreadsheet.keys()), [pd.NA] * len((dict_properties_visual_spreadsheet.keys())))), index=[0])
     # Load the background image to performs segmentation and re-compute morphometric properties using the same algorithm as CytoSense
     # cropping_area = df_cropping.loc['acquisitions']
     background = ski.io.imread(path_to_data.parent / 'cal_image_000001.tif', as_gray=True)  # [int(cropping_area[0]):int(cropping_area[1]),int(cropping_area[2]):int(cropping_area[3])]
@@ -219,7 +219,7 @@ for sample in list(mosaicfiles.keys()):
                                                        fontproperties=fontprops)
                             axes.add_artist(scalebar)
                             # axes.set_title('Particle ID: {}'.format(str(particle_id)))
-                            save_directory = Path(str(file.parent).replace('acquisitions', 'outputs')).expanduser().parent / sample
+                            save_directory = Path(str(file.parent).replace('A repasser', 'outputs')).expanduser().parent / sample
                             save_directory.mkdir(parents=True, exist_ok=True)
                             fig.savefig(fname=str(save_directory / 'thumbnail_{}_{}.jpg'.format(str(sample).rstrip(),str(particle_id).rstrip())), transparent=False, bbox_inches="tight", pad_inches=0, dpi=300)
                             plt.close('all')
@@ -243,7 +243,7 @@ for sample in list(mosaicfiles.keys()):
     df_summary[['Sample','Volume_processed_ml','Volume_imaged_ml']]=sample,df_ecotaxa.loc[1,'sample_volume_analyzed_ml'],df_ecotaxa.loc[1,'sample_volume_fluid_imaged_ml']
     df_summary.columns=df_summary.columns.astype(str).map({'Total':'Total','Sample':'Sample','Volume_processed_ml':'Volume_processed_ml','Volume_imaged_ml':'Volume_imaged_ml','(0, 10]':'0 to 10 µm','(10, 20]':'10 to 20 µm','(20, 50]':'20 to 50 µm','(50, 150]':'50 to 150 µm'})
     df_excel=pd.concat([df_excel,df_summary[['Sample','Volume_processed_ml','Volume_imaged_ml','0 to 10 µm','10 to 20 µm','20 to 50 µm','50 to 150 µm','Total']]],axis=0).reset_index(drop=True)
-    with pd.ExcelWriter(str(path_to_network / 'outputs' / 'Flowcam_recap_filtre_taille.xlsx'), engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+    with pd.ExcelWriter(str(path_to_network.parent / 'outputs' / 'Flowcam_recap_filtre_taille.xlsx'), engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
         df_excel.to_excel(writer, sheet_name='New', index=False)
 
 # Plot the Normalized Biovolume Size Spectra

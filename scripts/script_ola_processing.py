@@ -1,6 +1,7 @@
 ## Objective: This script generates summary data and figures from the database available at https://si-ola.inrae.fr/si_lacs/index.jsf#
 # Load modules and functions required for image processing
 import numpy as np
+from plotnine import scale_y_continuous
 
 try:
     from funcs_image_processing import *
@@ -38,13 +39,15 @@ df_env['month']=df_env.datetime.dt.strftime('%m')
 for variable, legend in {'Temperature':r'$\text{Temperature (}^{\degree})$C',
                          'Nitrates': r'$\text{NO}_{3-} \text{ concentration (mg/L)$',
                          'Orthophosphates': r'$\text{PO}_{4}^{3-} \text{ concentration (mg/L)}$',
+                         'Phosphore_Total': r'$\text{Total phosphorus} \text{ concentration (mg/L)}$',
                          'Silice': r'$\text{SiO}_{2} \text{ concentration (mg L}^{-1}$)'}.items():
     # Long-term environmental timeseries
-    plot = (ggplot(df_env.query('depth_min<10').dropna(subset=[variable])) +
+    plot = (ggplot(df_env.query('depth_min==5').dropna(subset=[variable])) +
             geom_line(mapping=aes(x='datetime', y=variable)) +
+            scale_y_continuous(minor_breaks=4)+
             labs(y=legend,x='', title='', colour='') +
             guides(colour=None, fill=None) +
-            theme_paper+theme(text=element_text(size=22))).draw(show=False)
+            theme(text=element_text(size=22))).draw(show=False)
     plot.set_size_inches(12, 4.5)
     plot.show()
     plot.savefig(fname='{}/figures/ola/ts_all_{}.pdf'.format(str(path_to_git),variable), dpi=300, bbox_inches='tight')

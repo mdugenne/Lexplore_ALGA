@@ -1,5 +1,4 @@
 ## Objective: This script process and upload thumbnails acquired by a FlowCam instrument (Visualspreadsheet v.5) on Ecotaxa to build image training sets
-import pandas as pd
 
 # Load modules and functions required for image processing
 try:
@@ -45,7 +44,7 @@ df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
 natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))[::-1]
-for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*')))))))):
+for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))[::-1]:
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -106,7 +105,7 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(ma
             df_properties=pd.DataFrame(ski.measure.regionprops_table(label_image=labelled,intensity_image=image,properties=['area_convex','area_bbox','axis_major_length','axis_minor_length','bbox','extent','slice']))
             # Identify and plot rectangular regions (=vignettes), except for the last two corresponding to the period in the bottom sentence displayed on the mosaic ('Property shown : Capture ID')
             # Extent is rounded to the 4th decimals to avoid skipping large bubbles that takes the full mosaic height
-            rect_idx=df_properties.query('(area_convex==area_bbox) & (extent.round(4)==1)').index+1#df_properties.query('(area_convex==area_bbox) & (extent==1)').index[:-2]+1
+            rect_idx=df_properties.query('(area_convex==area_bbox) & (extent.round(3)==1)').index+1#df_properties.query('(area_convex==area_bbox) & (extent==1)').index[:-2]+1
             ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,rect_idx).reshape(labelled.shape),image,0), cmap='gray'),plt.show()
             labelid_idx=((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')).sort_values(['bbox-1','bbox-0']).index)+1#((df_properties.query('(area_convex!=area_bbox) & (extent!=1)')[:-4]).sort_values(['bbox-1','bbox-0']).index)+1 #label are sorted according to the x position
             ##plt.figure(),plt.imshow(np.where(np.in1d(labelled,labelid_idx).reshape(labelled.shape),image,0), cmap='gray'),plt.show()
@@ -298,6 +297,7 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(ma
     df_properties_merged['spherical_check'] = df_properties_merged.axis_major_length/np.maximum(df_properties_merged.axis_minor_length,1)
     df_pca=pd.concat([pd.concat([df_properties_merged.set_index('Capture ID')[['circular_check','ellipsoidal_check','spherical_check','color_check']],df_properties_merged.set_index('Capture ID').image_intensity.apply(lambda x: pd.Series(np.mean(np.mean(x, axis=1), axis=0)))],axis=1),df_properties_merged.set_index('Capture ID').image_intensity.apply(lambda x: pd.Series(np.diff(np.mean(np.mean(x, axis=1), axis=0))))],axis=1)
     df_discarded= df_properties_merged.set_index('Capture ID')[((df_properties_merged.set_index('Capture ID').spherical_check <= 1.5)  & (df_properties_merged.set_index('Capture ID').circular_check < 0.9)) & ((df_properties_merged.set_index('Capture ID').ellipsoidal_check > 0.8)  & (df_properties_merged.set_index('Capture ID').ellipsoidal_check<1.1))  & (df_properties_merged.set_index('Capture ID').color_check) ] # & (df_properties_merged.set_index('Capture ID').circular_check > 0.6)
+    ''' # Add semi-automated cleaning steps
     if len(df_discarded): # Looking for additional particles to discard (e.g. background particles that move with the flow of the FlowCam Macro, bubbles)
         id_discarded=id_discarded+df_discarded.index.astype(int).tolist()
         # Use features extracted to identify duplicated particles resulting from a flow random orientation
@@ -354,16 +354,16 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(ma
         # Add particles that were manually removed as a final check
         if any(df_properties_merged['Capture ID'].isin(particle_id_check.unique())==False):
             id_discarded = natsorted(np.unique(id_discarded +list(df_properties_merged.loc[df_properties_merged['Capture ID'].isin(particle_id_check.unique())==False,'Capture ID'].astype(int).unique())))
-
+    '''
     id_discarded = natsorted(np.unique(id_discarded + list(compress(list(np.arange(1, particle_id + 1)),pd.Series(np.arange(1, particle_id + 1)).astype(str).isin(df_properties_merged['Capture ID'].unique()) == False))))
 
     if len(id_discarded):
         # Add skipped id to summary file for reproducibility
         with Path(str(path_to_data).replace('.csv','_summary.csv')).open(mode='r') as f:
             lines = f.readlines()
-        if any(pd.Series(lines).str.startswith('Skip')):
+        if any(pd.Series(lines).str.contains('Skip')):
             with Path(str(path_to_data).replace('.csv', '_summary.csv')).open(mode='w') as f:
-                for line in pd.Series(lines)[pd.Series(lines).str.startswith('Skip')==False].to_list():
+                for line in pd.Series(lines)[pd.Series(lines).str.contains('Skip')==False].to_list():
                     f.write(line)
 
         with Path(str(path_to_data).replace('.csv','_summary.csv')).open(mode='a') as file:
@@ -391,38 +391,47 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(ma
 
     # Generate Normalized Biovolume Size Spectra
     df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float))[['volume']],how='left',right_index=True,left_on=['Sample']), pixel_size=1, grouping_factor=['Sample']) # Set pixel size to 1 since pixel units were already converted to metric units
-    df_nbss=pd.concat([df_nbss.assign(instrument=lambda x: np.where(x.instrument.isna(),'FlowCam Micro',x.instrument)),df_nbss_sample],axis=0).reset_index(drop=True)
+    df_nbss=pd.concat([df_nbss.assign(instrument=lambda x: np.where(x.instrument.isna(),'FlowCam Micro',x.instrument) if 'instrument' in df_nbss.columns else pd.NA),df_nbss_sample],axis=0).reset_index(drop=True)
 
 # Plot the Normalized Biovolume Size Spectra
 #Attention, grouping factor should be a string
 save_directory = Path(cfg_metadata['flowcam_10x_context_file'].replace('acquisitions', 'ecotaxa')).expanduser().parent / 'sample_id'
 #df_nbss=pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument=lambda x:np.where(x.sample_id.str.contains('Flowcam_2mm'),'FlowCam Macro','FlowCam Micro')),natsorted(list(save_directory.parent.rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
 #df_nbss=pd.concat([df_nbss,pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument="CytoSense"),natsorted(list(Path(path_to_network / 'lexplore' / 'LEXPLORE' / 'ecotaxa' ).rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})],axis=0)
-plot = (ggplot(df_nbss) +
+plot = (ggplot(df_nbss.groupby(['instrument','size_class_mid']).apply(lambda x: pd.Series({'NBSS':x.NBSS.mean(),'NBSS_max':x.NBSS.quantile(0.95),'NBSS_min':x.NBSS.quantile(0.05),'NBSS_uncertainty':x.NBSS_uncertainty.mean()})).reset_index()) +
         #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
         #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
         #geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
-        stat_summary(mapping=aes(x='size_class_mid', y='NBSS',group='instrument',fill='instrument'),geom='pointrange',alpha=0.7,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
-
+        geom_pointrange(mapping=aes(x='size_class_mid', y='NBSS',ymin='NBSS_min',ymax='NBSS_max',group='instrument',fill='(np.where(NBSS_uncertainty>1,1,NBSS_uncertainty))'))+
+        scale_fill_gradientn(colors=list(reversed(sns.color_palette("RdBu",15).as_hex())))+
         #geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='instrument'), alpha=1)+
-        scale_colour_manual(values={'FlowCam Micro':'#{:02x}{:02x}{:02x}'.format(255,212,42),'FlowCam Macro':'#{:02x}{:02x}{:02x}'.format(152,95,95),'CytoSense':'#{:02x}{:02x}{:02x}'.format(76,95,95)})+
-        labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',colour='') +
-        scale_y_log10(breaks=10 ** np.arange(np.floor(np.log10(1e-01)) - 1, np.ceil(np.log10(1e+04)), step=1),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
-        scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        #stat_summary(mapping=aes(x='size_class_mid', y='NBSS', group='instrument',fill='instrument'), geom='pointrange',alpha=1, fun_data="median_hilow", fun_args={'confidence_interval': 0.95}) +
+        #scale_fill_manual(values={'FlowCam Micro':'#{:02x}{:02x}{:02x}'.format(255,212,42),'FlowCam Macro':'#{:02x}{:02x}{:02x}'.format(152,95,95),'CytoSense':'#{:02x}{:02x}{:02x}'.format(76,95,95)})+
+        labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',fill='Uncertainty') +
+        scale_y_log10(breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e-03)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e-03)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
+        scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [int(v) if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
         guides(colour=None,fill=None)+
         theme_paper).draw(show=False)
 plot.show()
-plot.savefig(fname='{}/figures/Initial_test/nbss.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
+plot.savefig(fname='{}/figures/Initial_test/nbss_uncertainties.svg'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 #Plot total abundance
-plot = (ggplot(df_nbss.query('Sample.str.contains("Flowcam")').groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))) +
+df_nbss
+df_nbss=df_nbss.assign(NBSS_uncertainty=lambda x: x.NBSS_std/x.NBSS).drop(columns=['index'])
+df_nbss=df_nbss.assign(NBSS_selection=df_nbss.reset_index().groupby(['Sample'], group_keys=False,sort=False, as_index=False).apply(lambda x: pd.DataFrame({'NBSS_selection':np.where(((x.index>=x.NBSS.idxmax()) & (x.index<x.loc[(x.index>=x.NBSS.idxmax()) & (x.NBSS_uncertainty>0.5)].index.min())) if len(x.loc[(x.index>=x.NBSS.idxmax()) & (x.NBSS_uncertainty>0.5)]) else (x.index>=x.NBSS.idxmax()),1,0)})).NBSS_selection.values)
+df_summary=df_nbss.query('(Sample.str.contains("Flowcam")) & (NBSS_selection==1)').groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))#.assign(NBSS=lambda x: np.where((x.Sample.str.contains('Flowcam_2mm')==False) & (x.datetime>=pd.to_datetime('2025-02-08')),x.NBSS*((4934/3926)-1)*10,x.NBSS))
+df_summary=df_nbss.query('(Sample.str.contains("Flowcam"))').groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))#.assign(NBSS=lambda x: np.where((x.Sample.str.contains('Flowcam_2mm')==False) & (x.datetime>=pd.to_datetime('2025-02-08')),x.NBSS*((4934/3926)-1)*10,x.NBSS))
+plot = (ggplot(df_summary) +
         facet_wrap('~instrument',ncol=1,scales='free')+
         geom_line(mapping=aes(x='datetime', y='NBSS'),size=.3, alpha=1) +  #
         labs(x='',y='Total abundance (particles per L$^{-1}$ or mL$^{-1}$)', title='',colour='') +
-        scale_y_log10(limits=[1,10000],breaks=np.multiply(10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape(int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1),np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: [v if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        scale_y_log10(limits=[100,50000],breaks=np.multiply(10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+05)), step=1).reshape(int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+05)))), 1),np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: [int(v) if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
         scale_x_date(date_breaks='1 month',date_labels='%b',limits=[datetime.date(2024,12,1),datetime.date(2025,12,31)]) +
+        geom_vline(xintercept=pd.to_datetime('2025-02-08'))+
         guides(colour=None,fill=None)+
         theme_paper).draw(show=False)
 plot.show()
+plot.savefig(fname='{}/figures/Initial_test/nbss_sum_all.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
+
 # Plot size comparisons
 plot = (ggplot(df_properties_all.assign(instrument=lambda x: x.Sample.str.split('_').str[0:2].str.join('_'))) +
         geom_point(mapping=aes(x='equivalent_diameter_area', y='Visualspreadsheet Diameter (ABD)',fill='instrument'),size=0.1, alpha=1) +  #

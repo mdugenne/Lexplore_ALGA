@@ -741,7 +741,7 @@ def annotation_in_WORMS(hierarchy):
 
     for annotation in hierarchy_levels[::-1]:
         with HTMLSession() as session:
-            data={'searchpar':'0','tName':annotation,'marine':'0','fossil':'4'}
+            data={'searchpar':'0','tName':annotation,'contentEnableExtant':'0','contentEnableMarine':'0'}
             # Turn marine only and extant only search off
             #session.post('https://www.marinespecies.org/aphia.php?p=search',data=data)
             taxon_list=session.post(url=url,data=data, headers={'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36'})
