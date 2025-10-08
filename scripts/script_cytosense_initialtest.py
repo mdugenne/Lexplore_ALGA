@@ -1,6 +1,4 @@
 ## Objective: This script performs a set of data processing steps on the initial test runs acquired with the CytoSense
-import pandas as pd
-from plotnine import geom_abline, scale_y_continuous
 
 from scripts.funcs_image_processing import cfg_metadata, nbss_estimates, path_to_network
 
@@ -42,11 +40,11 @@ plot = (ggplot(df_nbss) +
 plot.show()
 path_to_listmodes=list(Path(r"C:\Users\dugenne\Desktop\export_cytosense\Export_2025-01-07 16h30m31").rglob('*_Listmode.csv'))
 df_listmode=pd.concat(map(lambda file: pd.read_csv(file,sep=r',',engine='python',encoding='utf-8').assign(File='_'.join(file.name.split('_')[0:4]).replace(' ','_')) if file.exists() else pd.DataFrame({'File':file.parent.name.split('_',1)[1].replace(' ','_')},index=[0]),path_to_listmodes)).reset_index(drop=True)
-
-df_comparison=pd.merge(df_listmode.astype({'Particle ID':str,'File':str}),df_ecotaxa.astype({'Particle ID':str,'File':str}).drop(columns=['FL Orange Length', 'FL Yellow Maximum', 'FL Green Length', 'FWS Maximum', 'FWS Total', 'FL Green Maximum', 'FL Orange Maximum', 'FL Red Length', 'FL Orange Total', 'FL Yellow Length', 'FL Red Total', 'FL Red Maximum', 'FL Yellow Total', 'FWS Length', 'SWS Maximum', 'SWS Total', 'FL Green Total', 'SWS Length']),how='left',on=['File','Particle ID'])
+import re,scipy
+df_comparison=pd.merge(df_listmode.astype({'Particle ID':str,'File':str}),df_ecotaxa.astype({'Particle ID':str,'File':str}),how='left',on=['File','Particle ID'])
 df_comparison.columns=list(map(lambda str: re.sub(r'\W+', '',str).replace(' ','_'),df_comparison.columns))
-x_var,y_var='object_equivalent_diameter_area','FWS_Length'
-slope, intercept, r_value, p_value, std_err = stats.linregress(x=np.log10(df_comparison.dropna(subset=[x_var,y_var])[x_var]),y=np.log10(df_comparison.dropna(subset=[x_var,y_var])[y_var]))
+x_var,y_var='object_equivalent_diameter_area','FWSTotal'
+slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(x=np.log10(df_comparison.dropna(subset=[x_var,y_var])[x_var]),y=np.log10(df_comparison.dropna(subset=[x_var,y_var])[y_var]))
 ransac = linear_model.RANSACRegressor()
 ransac.fit(np.array(np.log10(df_comparison.dropna(subset=[x_var,y_var])[x_var])).reshape(-1,1),np.log10(df_comparison.dropna(subset=[x_var,y_var])[y_var]))
 ransac.estimator_.score(np.array(np.log10(df_comparison.dropna(subset=[x_var,y_var])[x_var])).reshape(-1,1),np.log10(df_comparison.dropna(subset=[x_var,y_var])[y_var]))
@@ -61,11 +59,11 @@ plot = (ggplot(df_comparison.dropna(subset=[x_var,y_var]).assign(y=lambda x: x.e
         theme_paper).draw(show=False)
 plot.show()
 ## Plot regression with statistics
-df_fws=df_ecotaxa.assign(Area=lambda x: x.object_area*(cfg_metadata['pixel_size_cytosense']**2),ECD=lambda x: x.object_equivalent_diameter_area*(cfg_metadata['pixel_size_cytosense'])).query('ECD<{}'.format(cfg_metadata['height_cytosense']*(cfg_metadata['pixel_size_cytosense']**2)/4))[['File','Particle ID','Area','ECD']+[col for col in df_ecotaxa.columns if 'SWS' in col][0:3]]
-df_fws=df_ecotaxa.assign(Area=lambda x: x.object_area*(cfg_metadata['pixel_size_cytosense']**2),ECD=lambda x: x.object_equivalent_diameter_area*(cfg_metadata['pixel_size_cytosense'])).query('ECD<{}'.format(cfg_metadata['height_cytosense']*(cfg_metadata['pixel_size_cytosense']**2)/4))[['File','Particle ID','Area','ECD']+[col for col in df_ecotaxa.columns if 'FWS' in col][0:3]]
-x_var='FWS Length'
+df_fws=df_ecotaxa.assign(Area=lambda x: x.object_area*(cfg_metadata['pixel_size_cytosense']**2),ECD=lambda x: x.object_equivalent_diameter_area*(cfg_metadata['pixel_size_cytosense'])).query('ECD<{}'.format(cfg_metadata['height_cytosense']*(cfg_metadata['pixel_size_cytosense']**2)/4))[['File','Particle ID','Area','ECD']+[col for col in df_ecotaxa.columns if 'sws' in col][0:3]]
+df_fws=df_ecotaxa.assign(Area=lambda x: x.object_area*(cfg_metadata['pixel_size_cytosense']**2),ECD=lambda x: x.object_equivalent_diameter_area*(cfg_metadata['pixel_size_cytosense'])).query('ECD<{}'.format(cfg_metadata['height_cytosense']*(cfg_metadata['pixel_size_cytosense']**2)/4))[['File','Particle ID','Area','ECD']+[col for col in df_ecotaxa.columns if 'fws' in col][0:3]]
+x_var='object_fws_total'
 y_var,y_unit='ECD',r'$\mu$m'
-slope, intercept, r_value, p_value, std_err = stats.linregress(x=np.log10(df_fws.dropna()[x_var]),y=np.log10(df_fws.dropna()[y_var]))
+slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(x=np.log10(df_fws.dropna()[x_var]),y=np.log10(df_fws.dropna()[y_var]))
 plot = (ggplot(data=df_fws)+
         geom_abline(slope=slope, intercept=intercept, alpha=1) +
         geom_point(aes(x=x_var, y=y_var),size = 1, alpha=0.1, shape = 'o')+

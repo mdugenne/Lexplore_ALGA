@@ -1,6 +1,9 @@
 ## Objective: This script process the level 2 thetis netcdf datafiles downloaded on  https://www.datalakes-eawag.ch/data (product LeXPLORE Thetis Vertical Profiler Depth Time Grid)
 
 import warnings
+
+from plotnine import geom_tile, scale_fill_distiller
+
 warnings.filterwarnings(action='ignore')
 
 # Path and File processing modules
@@ -42,12 +45,12 @@ from tqdm import tqdm
 from functools import reduce
 from funcy import join_with
 matplotlib.use('Qt5Agg')
-
+import pylake
 dict_color={'Chl2':'#{:02x}{:02x}{:02x}'.format(0,128,0),'PhycoCy':'#{:02x}{:02x}{:02x}'.format(200,55,55),'PhycoEr':'#{:02x}{:02x}{:02x}'.format(255,153,85),'bb700':'#{:02x}{:02x}{:02x}'.format(108,83,83),'Temp':'#{:02x}{:02x}{:02x}'.format(55,113,200)}
 
 #Workflow starts here:
 ## Load netcdf files after uncompressing the zip directory downloaded from the datalakes portal
-path_datafiles=natsorted(list(Path(path_to_git / 'data' / 'datafiles' / 'thetis').expanduser().glob('*depthtimegrid*')))
+path_datafiles=natsorted(list(Path(path_to_git / 'data' / 'datafiles' / 'datalakes').expanduser().rglob('*.nc')))
 
 for file in path_datafiles:
 
@@ -57,8 +60,29 @@ for file in path_datafiles:
         except:
             print(r'Error uncompressing folder {}.\n Please check and re-export if needed'.format(str(file)))
 
-path_datafiles=natsorted(list(Path(path_to_git / 'data' / 'datafiles' / 'thetis').expanduser().rglob('*.nc')))
-# Identify monthly datafiles and generate monthly plots and reduce the memory load
+path_datafiles=natsorted(list(Path(path_to_git / 'data' / 'datafiles' / 'datalakes').expanduser().rglob('*.nc')))
+
+#Process Idronaut files
+files=natsorted([file for file in path_datafiles if file.parent.name=='idronaut'])
+df = pd.concat(map(lambda path: xr.open_dataset(r'{}'.format(str(path))).to_dataframe().reset_index(), files)).reset_index(drop=True)
+ds=xr.open_dataset(files[-1])
+ds = ds.assign_coords({"Press": ds.Press * -1})
+fig, ax = plt.subplots(figsize = (4, 6))
+ax.axhline(y=[-3.5], linestyle='--',color='black')
+ax.axhline(y=[-7], linestyle='--',color='black')
+ax.axhline(y=[-15], linestyle='--',color='black')
+ax.axhline(y=[-20], linestyle='--',color='black')
+ax.axhline(y=[-25], linestyle='--',color='black')
+ax.axhline(y=[-30], linestyle='--',color='black')
+ds.PhycoCy.plot(cmap='twilight', norm=colors.LogNorm(), vmin=1e0)
+plt.ylabel('PhcoCyanin concentration (ug/L)')
+plt.show()
+plt.savefig(fname='{}/figures/datalakes/section_phcocyanin_082025.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
+
+#Process CTD profiles
+
+
+# Identify monthly datafiles and generate monthly plots to reduce the memory load
 dict_datafiles=join_with(list,[{file.stem.rsplit('_',2)[1][0:4]:file} for file in path_datafiles])
 df_all=pd.DataFrame()
 for date,datafiles in dict_datafiles.items():

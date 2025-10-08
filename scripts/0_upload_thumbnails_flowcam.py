@@ -44,7 +44,7 @@ df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
 natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))[::-1]
-for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))[::-1]:
+for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))[::-1][1:41]:
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -389,15 +389,70 @@ for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(ma
 
     upload_thumbnails_ecotaxa_project(ecotaxa_configuration=configuration, project_id=int(cfg_metadata['ecotaxa_'+df_metadata.loc[sample,'Ecotaxa_project'].lower()+'_projectid']), source_path=str(save_directory)+'.zip')
 
-    # Generate Normalized Biovolume Size Spectra
+    # Compute Normalized Biovolume Size Spectra
     df_nbss_sample, df_nbss_boot_sample = nbss_estimates(df=pd.merge( df_properties_merged,df_volume.loc[sample].to_frame().T.assign(volume=lambda x: x.Fluid_Volume_Imaged.str.replace(' ml','').astype(float))[['volume']],how='left',right_index=True,left_on=['Sample']), pixel_size=1, grouping_factor=['Sample']) # Set pixel size to 1 since pixel units were already converted to metric units
     df_nbss=pd.concat([df_nbss.assign(instrument=lambda x: np.where(x.instrument.isna(),'FlowCam Micro',x.instrument) if 'instrument' in df_nbss.columns else pd.NA),df_nbss_sample],axis=0).reset_index(drop=True)
+
+# Check for additional files that should be uploaded in case the server was slow
+zip_files=natsorted(list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('*.zip')))
+df_zip=pd.DataFrame(zip_files).assign(sample_id=lambda x: x[0].astype(str).str.split(str(os.sep)).str[-1].str.replace('.zip',''))
+project_list=[str(cfg_metadata['ecotaxa_'+project+'_projectid']) for project in df_metadata.Ecotaxa_project.str.lower().unique()]
+df_samples=check_ecotaxa_sample(ecotaxa_configuration=configuration,project_id=project_list)
+df_zip=pd.merge(df_zip,df_samples,how='left',on='sample_id')
+for file in df_zip.loc[df_zip.sample_id.isin(df_samples.sample_id.unique())==False,0].unique()[0:-6]:
+    try:
+        project=int(project_list[0]) if 'Flowcam_10x_' in file.stem else int(project_list[1])
+        print('Trying to upload {}, please wait'.format(file.stem))
+        upload_thumbnails_ecotaxa_project(ecotaxa_configuration=configuration, project_id=project,source_path=str(file))
+    except:
+        print('Skipping sample {}, try again.'.format(file.stem))
 
 # Plot the Normalized Biovolume Size Spectra
 #Attention, grouping factor should be a string
 save_directory = Path(cfg_metadata['flowcam_10x_context_file'].replace('acquisitions', 'ecotaxa')).expanduser().parent / 'sample_id'
 #df_nbss=pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument=lambda x:np.where(x.sample_id.str.contains('Flowcam_2mm'),'FlowCam Macro','FlowCam Micro')),natsorted(list(save_directory.parent.rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})
 #df_nbss=pd.concat([df_nbss,pd.concat(map(lambda path_ecotaxa:(nbss_estimates(df=pd.read_csv(path_ecotaxa,sep='\t').drop(index=[0]).astype({'object_area':float,'sample_volume_fluid_imaged_ml':float}).rename(columns={'object_area':'area','sample_volume_fluid_imaged_ml':'volume'}), pixel_size=1, grouping_factor=['sample_id'])[0]).assign(instrument="CytoSense"),natsorted(list(Path(path_to_network / 'lexplore' / 'LEXPLORE' / 'ecotaxa' ).rglob('ecotaxa_table_*'))))).reset_index(drop=True).rename(columns={'sample_id':'Sample'})],axis=0)
+df_nbss=df_nbss.assign(NBSS_uncertainty=lambda x: x.NBSS_std/x.NBSS).drop(columns=['index'])
+df_nbss=df_nbss.assign(NBSS_selection=df_nbss.reset_index().groupby(['Sample'], group_keys=False,sort=False, as_index=False).apply(lambda x: pd.DataFrame({'NBSS_selection':np.where(((x.index>=x.NBSS.idxmax()) & (x.index<x.loc[(x.index>=x.NBSS.idxmax()) & (x.NBSS_uncertainty>0.5)].index.min())) if len(x.loc[(x.index>=x.NBSS.idxmax()) & (x.NBSS_uncertainty>0.5)]) else (x.index>=x.NBSS.idxmax()),1,0)})).NBSS_selection.values)
+df_plot=df_nbss.query('instrument=="FlowCam Macro"').assign(datetime=lambda x: pd.to_datetime(x.Sample.astype(str).str.split('_').str[4],format='%Y%m%d')).astype({'datetime':'str'})
+plot = (ggplot(df_plot[df_plot.datetime.isin(['2025-02-25','2025-02-26'])]) +
+        stat_summary(mapping=aes(x='size_class_mid', y='NBSS', group='datetime',fill='datetime'), geom='pointrange',alpha=1, fun_data="median_hilow", fun_args={'confidence_interval': 0.95}) +
+        labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',fill='Uncertainty') +
+        scale_y_log10(breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e-03)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e-03)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
+        scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [int(v) if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
+plot.show()
+plot = (ggplot(df_nbss.query('instrument=="FlowCam Macro"').assign(datetime=lambda x: pd.to_datetime(x.Sample.astype(str).str.split('_').str[4],format='%Y%m%d')).assign(tag=lambda x: np.where(x.datetime>=pd.to_datetime('2025-03-01'),'after March','Before March'))) +
+        #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
+        #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
+        #geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
+        #geom_pointrange(mapping=aes(x='size_class_mid', y='NBSS',ymin='NBSS_min',ymax='NBSS_max',group='instrument',fill='(np.where(NBSS_uncertainty>1,1,NBSS_uncertainty))'))+
+        #scale_fill_gradientn(colors=list(reversed(sns.color_palette("RdBu",15).as_hex())))+
+        #geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='instrument'), alpha=1)+
+        stat_summary(mapping=aes(x='size_class_mid', y='NBSS', group='tag',fill='tag'), geom='pointrange',alpha=1, fun_data="median_hilow", fun_args={'confidence_interval': 0.95}) +
+        #scale_fill_manual(values={'FlowCam Micro':'#{:02x}{:02x}{:02x}'.format(255,212,42),'FlowCam Macro':'#{:02x}{:02x}{:02x}'.format(152,95,95),'CytoSense':'#{:02x}{:02x}{:02x}'.format(76,95,95)})+
+        labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',fill='Uncertainty') +
+        scale_y_log10(breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e-03)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e-03)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
+        scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [int(v) if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
+plot.show()
+plot = (ggplot(df_nbss) +
+        #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
+        #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
+        #geom_ribbon(mapping=aes(x='size_class_mid', y='NBSS',ymin='np.maximum(0,NBSS-NBSS_std/2)',ymax='NBSS+NBSS_std/2',group='Sample',color='Sample'),alpha=0.1)+
+        #geom_pointrange(mapping=aes(x='size_class_mid', y='NBSS',ymin='NBSS_min',ymax='NBSS_max',group='instrument',fill='(np.where(NBSS_uncertainty>1,1,NBSS_uncertainty))'))+
+        #scale_fill_gradientn(colors=list(reversed(sns.color_palette("RdBu",15).as_hex())))+
+        #geom_point(mapping=aes(x='size_class_mid', y='NBSS',group='Group_index',colour='instrument'), alpha=1)+
+        stat_summary(mapping=aes(x='size_class_mid', y='NBSS', group='instrument',fill='instrument'), geom='pointrange',alpha=1, fun_data="median_hilow", fun_args={'confidence_interval': 0.95}) +
+        #scale_fill_manual(values={'FlowCam Micro':'#{:02x}{:02x}{:02x}'.format(255,212,42),'FlowCam Macro':'#{:02x}{:02x}{:02x}'.format(152,95,95),'CytoSense':'#{:02x}{:02x}{:02x}'.format(76,95,95)})+
+        labs(x='Equivalent circular diameter ($\mu$m)',y='Normalized Biovolume Size Spectra ($\mu$m$^{3}$ mL$^{-1}$ $\mu$m$^{-3}$)', title='',fill='Uncertainty') +
+        scale_y_log10(breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e-03)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e-03)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: ['10$^{%s}$' % int(np.log10(v)) if (np.log10(v)) / int(np.log10(v)) == 1 else '10$^{0}$' if v == 1 else '' for v in l]) +
+        scale_x_log10( breaks=np.multiply( 10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+04)), step=1).reshape( int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+04)))), 1), np.arange(1, 10, step=1).reshape(1, 9)).flatten(), labels=lambda l: [int(v) if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
+plot.show()
 plot = (ggplot(df_nbss.groupby(['instrument','size_class_mid']).apply(lambda x: pd.Series({'NBSS':x.NBSS.mean(),'NBSS_max':x.NBSS.quantile(0.95),'NBSS_min':x.NBSS.quantile(0.05),'NBSS_uncertainty':x.NBSS_uncertainty.mean()})).reset_index()) +
         #geom_point(mapping=aes(x='(1/6)*np.pi*(size_class_mid**3)', y='NBSS'), alpha=1) +  #
         #stat_summary(data=df_nbss_boot_sample.melt(id_vars=['Group_index','Sample','size_class_mid'],value_vars='NBSS'),mapping=aes(x='size_class_mid', y='value',group='Sample',fill='Sample'),geom='ribbon',alpha=0.1,fun_data="median_hilow",fun_args={'confidence_interval':0.95})+
@@ -416,22 +471,37 @@ plot.show()
 plot.savefig(fname='{}/figures/Initial_test/nbss_uncertainties.svg'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 #Plot total abundance
 df_nbss
-df_nbss=df_nbss.assign(NBSS_uncertainty=lambda x: x.NBSS_std/x.NBSS).drop(columns=['index'])
-df_nbss=df_nbss.assign(NBSS_selection=df_nbss.reset_index().groupby(['Sample'], group_keys=False,sort=False, as_index=False).apply(lambda x: pd.DataFrame({'NBSS_selection':np.where(((x.index>=x.NBSS.idxmax()) & (x.index<x.loc[(x.index>=x.NBSS.idxmax()) & (x.NBSS_uncertainty>0.5)].index.min())) if len(x.loc[(x.index>=x.NBSS.idxmax()) & (x.NBSS_uncertainty>0.5)]) else (x.index>=x.NBSS.idxmax()),1,0)})).NBSS_selection.values)
-df_summary=df_nbss.query('(Sample.str.contains("Flowcam")) & (NBSS_selection==1)').groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))#.assign(NBSS=lambda x: np.where((x.Sample.str.contains('Flowcam_2mm')==False) & (x.datetime>=pd.to_datetime('2025-02-08')),x.NBSS*((4934/3926)-1)*10,x.NBSS))
-df_summary=df_nbss.query('(Sample.str.contains("Flowcam"))').groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))#.assign(NBSS=lambda x: np.where((x.Sample.str.contains('Flowcam_2mm')==False) & (x.datetime>=pd.to_datetime('2025-02-08')),x.NBSS*((4934/3926)-1)*10,x.NBSS))
+df_summary=df_nbss.query('(Sample.str.contains("Flowcam")) & (NBSS_selection==1)').groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))
+df_summary=df_nbss.query('(Sample.str.contains("Flowcam"))').groupby('Sample').NBSS.sum().reset_index().assign(NBSS=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),x.NBSS,x.NBSS*1000),datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))
+# Fill in timeseries with NAs for plots
+df_summary.datetime
+df_summary=pd.merge(df_summary,pd.DataFrame({'datetime':np.tile(pd.date_range(start=df_summary.datetime.min(), end=df_summary.datetime.max(), freq='1D'),2),'instrument':['FlowCam Micro']*len(pd.date_range(start=df_summary.datetime.min(), end=df_summary.datetime.max(), freq='1D'))+['FlowCam Macro']*len(pd.date_range(start=df_summary.datetime.min(), end=df_summary.datetime.max(), freq='1D'))}),how='right',on=['datetime','instrument'])
 plot = (ggplot(df_summary) +
         facet_wrap('~instrument',ncol=1,scales='free')+
         geom_line(mapping=aes(x='datetime', y='NBSS'),size=.3, alpha=1) +  #
         labs(x='',y='Total abundance (particles per L$^{-1}$ or mL$^{-1}$)', title='',colour='') +
         scale_y_log10(limits=[100,50000],breaks=np.multiply(10 ** np.arange(np.floor(np.log10(1e+00)), np.ceil(np.log10(1e+05)), step=1).reshape(int((np.ceil(np.log10(1e+00)) - np.floor(np.log10(1e+05)))), 1),np.arange(1, 10, step=1).reshape(1, 9)).flatten(),labels=lambda l: [int(v) if ((v / (10 ** np.floor(np.log10(v)))) == 1) else '' for v in l]) +
-        scale_x_date(date_breaks='1 month',date_labels='%b',limits=[datetime.date(2024,12,1),datetime.date(2025,12,31)]) +
-        geom_vline(xintercept=pd.to_datetime('2025-02-08'))+
+        scale_x_date(date_breaks='1 month',date_labels='%b',limits=[datetime.date(2024,12,1),datetime.date(2025,9,1)]) +
+        #geom_vline(xintercept=pd.to_datetime('2025-02-25'))+
         guides(colour=None,fill=None)+
         theme_paper).draw(show=False)
 plot.show()
-plot.savefig(fname='{}/figures/Initial_test/nbss_sum_all.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
+plot.set_size_inches(10.7, 9.5)
+plot.savefig(fname='{}/figures/ecotaxa/nbss_sum_all.pdf'.format(str(path_to_git)), dpi=300, bbox_inches='tight')
 
+# Plot volume imaged to detect potential outliers
+df_summary=df_nbss.query('(Sample.str.contains("Flowcam"))').groupby('Sample').volume.first().reset_index().assign(datetime=lambda x: pd.to_datetime(x.Sample.str.split('_').str[4],format='%Y%m%d'),instrument=lambda x: np.where(x.Sample.str.contains('Flowcam_10x'),'FlowCam Micro','FlowCam Macro'))
+df_summary.datetime
+df_summary=pd.merge(df_summary,pd.DataFrame({'datetime':np.tile(pd.date_range(start=df_summary.datetime.min(), end=df_summary.datetime.max(), freq='1D'),2),'instrument':['FlowCam Micro']*len(pd.date_range(start=df_summary.datetime.min(), end=df_summary.datetime.max(), freq='1D'))+['FlowCam Macro']*len(pd.date_range(start=df_summary.datetime.min(), end=df_summary.datetime.max(), freq='1D'))}),how='right',on=['datetime','instrument'])
+plot = (ggplot(df_summary) +
+        facet_wrap('~instrument',ncol=1,scales='free')+
+        geom_line(mapping=aes(x='datetime', y='volume'),size=.3, alpha=1) +  #
+        labs(x='',y='Total abundance (particles per L$^{-1}$ or mL$^{-1}$)', title='',colour='') +
+        scale_x_date(date_breaks='1 month',date_labels='%b',limits=[datetime.date(2024,12,1),datetime.date(2025,12,31)]) +
+        #geom_vline(xintercept=pd.to_datetime('2025-02-25'))+
+        guides(colour=None,fill=None)+
+        theme_paper).draw(show=False)
+plot.show()
 # Plot size comparisons
 plot = (ggplot(df_properties_all.assign(instrument=lambda x: x.Sample.str.split('_').str[0:2].str.join('_'))) +
         geom_point(mapping=aes(x='equivalent_diameter_area', y='Visualspreadsheet Diameter (ABD)',fill='instrument'),size=0.1, alpha=1) +  #
