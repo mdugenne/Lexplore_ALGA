@@ -1,10 +1,12 @@
 ## Objective: This script generates summary data and figures from the database available at https://www.alplakes.eawag.ch/
 # Load modules and functions required for image processing
 from functools import partial
-
+import matplotlib
+matplotlib.use('TKAgg')
 import shapely.plotting
 import warnings
 
+from fontTools.otlLib.optimize import compact
 from matplotlib.font_manager import json_dump
 
 warnings.filterwarnings(action='ignore',category=SyntaxWarning)
@@ -112,86 +114,158 @@ plt.figure()
 geo_grid.z.plot(cmap='twilight')
 plt.show()
 '''
-nc_bathy = xr.open_dataset(path_to_git / 'data' /'bathymetry_geneva.nc')
-plt.figure()
-plt.pcolormesh(np.array((-1*nc_bathy.z))[::-1,:])
-plt.pcolormesh(np.array((nc_bathy.z<-15))[::-1,:])
-plt.show()
 
-fig, ax = plt.subplots(1)
-cs=plt.contour(nc_bathy.x,nc_bathy.y[::-1],nc_bathy.z[::-1,:],levels=[-13,-10],alpha=0.5)
-polygon_bathy=shapely.intersection(Polygon(cs.allsegs[0][0]),Polygon(cs.allsegs[1][0]))
+nc_bathy =xr.open_dataset(path_to_git / 'data' /'bathymetry_geneva.nc') #xr.open_dataset(path_to_git / 'data' /"bathymetry_geneva.tif").rename_vars({'band_data':'z'}).squeeze('band')#
+#plt.figure()
+#plt.pcolormesh(np.array((-1*nc_bathy.z)))
+#plt.pcolormesh(np.array((nc_bathy.z<-15)))
+#plt.show()
+
+#fig, ax = plt.subplots(1)
+#cs=plt.contour(nc_bathy.x,nc_bathy.y,nc_bathy.z,levels=[-13,-10],alpha=0.5)
+#polygon_bathy=shapely.intersection(Polygon(cs.allsegs[0][0]),Polygon(cs.allsegs[1][0]))
+#gdr = gpd.GeoDataFrame({'feature':[0] , 'geometry': polygon_bathy},crs='EPSG:4326')
+#gdr.to_file(path_to_git / 'data' / "bathymetry_geneva.shp")
+import shapefile
+polygon_bathy = gpd.read_file(path_to_git / 'data' / "bathymetry_geneva.shp").geometry[0]
 from shapely.plotting import plot_polygon
 #plot_polygon(polygon_bathy)
+import rioxarray as rio
+# Mask raster according to bathymetry
+df_polygon = nc_bathy.to_dataframe().reset_index()[['x', 'y']].drop_duplicates(subset=['x', 'y'])
+points = list(map(lambda coords: Point(coords[0], coords[1]), df_polygon.values))
+df_polygon = df_polygon.assign(z=polygon_bathy.contains(points))
+masked_geo_grid = xr.merge([nc_bathy, xr.Dataset.from_dataframe(df_polygon.set_index(['x', 'y'])).rename_vars({'z':'isobath'})])
+masked_geo_grid = xr.where(masked_geo_grid.isobath == True, masked_geo_grid, np.nan, keep_attrs=True)
+nc_bathy = masked_geo_grid.transpose('y','x')
+nc_bathy =nc_bathy.rio.set_spatial_dims(x_dim='x', y_dim='y')
+nc_bathy=nc_bathy.rio.write_crs("epsg:4326", inplace=True)
+nc_bathy.drop('isobath').rio.to_raster(path_to_git / 'data' /"bathymetry_geneva.tif")
+# fig, ax = plt.subplots()
+# plot=ax.pcolormesh(geo_grid.coords['x'].data,geo_grid.coords['y'].data[::-1],geo_grid.temperature.data[0,::-1],cmap='twilight')
+# fig.colorbar(plot, ax=ax)
+# ax.set_title(pd.to_datetime(nc.variables['time'].values[time_index].tolist())[0])
 
-df_raster=nc_bathy.to_dataframe().reset_index()
+df_raster=(xr.open_dataset(path_to_git / 'data' /"bathymetry_geneva.tif").rename_vars({'band_data':'z'}).squeeze('band')).to_dataframe().reset_index()
 from urllib.request import urlopen
-def tiff_rasterize(tiff,time_index,depth_index=0,grid_resolution=0.002):
-
-def download_sentinel_data(year='2024',month='06',path_output=path_to_git / 'data' / 'datafiles' / 'alplakes' / 'sentinel'):
+import datetime
+import xarray_regrid
+def download_sentinel_data(year='2022',month='06',path_output=path_to_git / 'data' / 'datafiles' / 'alplakes' / 'sentinel'):
     df_metadata=pd.DataFrame(json.loads(urlopen('https://alplakes-api.eawag.ch/remotesensing/products/geneva/sentinel3/chla').read()))
     df_metadata['datetime']=pd.to_datetime(df_metadata.datetime,format='%Y%m%dT%H%M%S')
     df_metadata['percentage_valid_pixels']=df_metadata['valid_pixels'].str[0:-1].astype(float)
-    df_metadata=df_metadata[(df_metadata.datetime>=np.datetime64(datetime(int(year),int(month),1))) & (df_metadata.datetime<np.datetime64(datetime(int(year),int(month)+1,1)))]
+    df_metadata=df_metadata[(df_metadata.datetime>=np.datetime64(datetime.datetime(int(year),int(month),1))) & (df_metadata.datetime<np.datetime64(datetime.datetime(int(year),int(month)+1,1)))]
     df_metadata=df_metadata.loc[df_metadata.groupby(['datetime']).percentage_valid_pixels.idxmax()]
-    df_metadata['week']=df_metadata['datetime'].dt.strftime('%Y-%m')+' '+np.mod(df_metadata['datetime'].dt.strftime('%W').astype(int),7).astype(str).str.zfill(2)
+    df_metadata['week']=df_metadata['datetime'].dt.strftime('%Y-%m %U')#df_metadata['datetime'].dt.strftime('%Y-%m')+' '+np.mod(df_metadata['datetime'].dt.strftime('%W').astype(int),7).astype(str).str.zfill(2)
+    nc_grid =xr.Dataset()
     with requests.Session() as session:
         for week in df_metadata.week.unique():
-            path_weekly_files=[]
+            path_weekly_chl_files,path_weekly_secchi_files,path_weekly_turbidity_files=[],[],[]
             file_url = df_metadata.loc[df_metadata.week==week, 'url']
-            for file in file_url:
-                path_to_file = Path(path_output).expanduser() / str(file).split(r'/')[-1]
-                path_weekly_files=path_weekly_files+[path_to_file]
+            for i,file in file_url.items():
+
                 # Get chl-a estimates
-                with session.get(file, stream=True, headers={'Connection': 'Keep-Alive','User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36'}) as rsp:
-                    with open(path_to_file, "wb") as f:
-                        for a_chunk in rsp.iter_content(chunk_size=131072):  # Loop over content, i.e. eventual HTTP chunks
-                            f.write(a_chunk)
-                # Get secchi depth estimates
-                path_to_file=
-                secchi_file_url=file
-                with session.get(file, stream=True, headers={'Connection': 'Keep-Alive','User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36'}) as rsp:
-                    with open(path_to_file, "wb") as f:
-                        for a_chunk in rsp.iter_content(chunk_size=131072):  # Loop over content, i.e. eventual HTTP chunks
-                            f.write(a_chunk)
+                path_to_file = Path(path_output).expanduser() / str(file).split(r'/')[-1]
+                if not session.get(file).status_code==404:
+                    path_weekly_chl_files=path_weekly_chl_files+[path_to_file]
 
-            nc = xr.open_mfdataset(path_weekly_files,combine='nested',concat_dim='time')
-            nc.coords['time']=df_metadata.loc[df_metadata.week==week, 'datetime']
-            nc=nc.sel(y=slice(df_raster.y.max(),df_raster.y.min()),x=slice(df_raster.x.min(),df_raster.x.max()),band=1)
-            nc=nc.mean(dim=['time'])
-            fig, ax = plt.subplots()
-            plot=plt.pcolormesh(nc.variables['band_data'].data[::-1])
-            fig.colorbar(plot, ax=ax)
+                    with session.get(file, stream=True, headers={'Connection': 'Keep-Alive','User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36'}) as rsp:
+                        with open(path_to_file, "wb") as f:
+                            for a_chunk in rsp.iter_content(chunk_size=131072):  # Loop over content, i.e. eventual HTTP chunks
+                                f.write(a_chunk)
+                    # Get secchi depth estimates
+                secchi_file_url = file.replace( 'https://eawagrs.s3.eu-central-1.amazonaws.com/datalakes/sui/S3A_{}/'.format(file.split('_')[-2]),'https://eawagrs.s3.eu-central-1.amazonaws.com/alplakes/cropped/sentinel3/geneva/').replace('OC3_chla_', 'SECCHIDEPTH_Zsd_lee_').replace('_sui.tif', '_sui_geneva.tif')
+                if not session.get(secchi_file_url).status_code == 404:
+                    path_to_secchi_file=Path(str(path_to_file).replace(str(file).split(r'/')[-1],str(secchi_file_url).split(r'/')[-1]))
+                    path_weekly_secchi_files = path_weekly_secchi_files + [path_to_secchi_file]
 
-            df_gf = gpd.GeoDataFrame(,
-                                     geometry=gpd.points_from_xy(df_coords_untf.dropna(subset=['lat', 'lon']).lon,
-                                                                 df_coords_untf.dropna(subset=['lat', 'lon']).lat),
-                                     crs=4326)
-            # Rasterize Points to Gridded Xarray Dataset
+                    with session.get(secchi_file_url, stream=True, headers={'Connection': 'Keep-Alive','User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36'}) as rsp:
+                        with open(path_to_secchi_file, "wb") as f:
+                            for a_chunk in rsp.iter_content(chunk_size=131072):  # Loop over content, i.e. eventual HTTP chunks
+                                f.write(a_chunk)
 
-            geo_grid = make_geocube(
-                vector_data=df_gf,  # [df_gf.time==df_coords_untf.time.unique()[0]]
-                measurements=['temperature', 'u', 'v', 'w', 'velocity_magnitude', 'bottom_stress_u', 'bottom_stress_v',
-                              'bottom_stress_max', 'eddy_viscosity', 'eddy_diffusivity', 'hydrostatic_pressure',
-                              'thermocline_depth', 'water_density'],  #
-                datetime_measurements=['time'],
-                resolution=grid_resolution,  # degrees
-                rasterize_function=rasterize_points_griddata,
-                group_by="time",
-            )
+                # Get turbidity estimates
+                turbidity_file_url = file.replace( 'https://eawagrs.s3.eu-central-1.amazonaws.com/datalakes/sui/S3A_{}/'.format(file.split('_')[-2]),'https://eawagrs.s3.eu-central-1.amazonaws.com/alplakes/cropped/sentinel3/geneva/').replace('OC3_chla_', 'POLYMER_tsm_binding754_').replace('_sui.tif', '_sui_geneva.tif')
+                if not session.get(turbidity_file_url).status_code == 404:
+                    path_to_turbidity_file=Path(str(path_to_file).replace(str(file).split(r'/')[-1],str(turbidity_file_url).split(r'/')[-1]))
+                    path_weekly_turbidity_files = path_weekly_turbidity_files + [path_to_turbidity_file]
+                    date_turbulence = np.array(df_metadata.at[i, 'datetime'])
+                    with session.get(turbidity_file_url, stream=True, headers={'Connection': 'Keep-Alive','User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/66.0.3359.181 Safari/537.36'}) as rsp:
+                        with open(path_to_turbidity_file, "wb") as f:
+                            for a_chunk in rsp.iter_content(chunk_size=131072):  # Loop over content, i.e. eventual HTTP chunks
+                                f.write(a_chunk)
+            if len(path_weekly_turbidity_files):
+                nc_turbidity=xr.open_mfdataset(path_weekly_turbidity_files,combine='nested',concat_dim='time')
 
-            # Mask raster according to bathymetry
-            df_polygon = geo_grid.to_dataframe().reset_index()[['x', 'y']].drop_duplicates(subset=['x', 'y'])
-            points = list(map(lambda coords: Point(coords[0], coords[1]), df_polygon.values))
-            df_polygon = df_polygon.assign(z=polygon_bathy.contains(points))
-            masked_geo_grid = xr.merge([geo_grid, xr.Dataset.from_dataframe(df_polygon.set_index(['x', 'y']))])
-            masked_geo_grid = xr.where(masked_geo_grid.z == True, masked_geo_grid, np.nan, keep_attrs=True)
-            geo_grid = masked_geo_grid.transpose()
+                nc_turbidity = nc_turbidity.sel(band=1)
+                nc_turbidity=nc_turbidity.mean(dim=['time'])
+                #fig, ax = plt.subplots()
+                #plot=plt.pcolormesh(nc_turbidity.variables['band_data'].data[::-1])
+                #fig.colorbar(plot, ax=ax)
+                nc_turbidity=nc_turbidity.rename({'band_data':'turbidity'})
+                nc_turbidity= nc_turbidity.regrid.linear(xr.open_dataset(list(Path(path_to_git / 'data' / 'datafiles' / 'alplakes' / 'flow3d').expanduser().glob('*.nc'))[0]))
+            else:
+                nc_turbidity=xr.Dataset()
+            if len(path_weekly_turbidity_files):
+                nc_secchi=xr.open_mfdataset(path_weekly_secchi_files,combine='nested',concat_dim='time')
+
+                nc_secchi = nc_secchi.sel(band=1)
+                nc_secchi=nc_secchi.mean(dim=['time'])
+                #fig, ax = plt.subplots()
+                #plot=plt.pcolormesh(nc_secchi.variables['band_data'].data[::-1])
+                #fig.colorbar(plot, ax=ax)
+                nc_secchi=nc_secchi.rename({'band_data':'secchi_depth'})
+                nc_secchi= nc_secchi.regrid.linear(xr.open_dataset(list(Path(path_to_git / 'data' / 'datafiles' / 'alplakes' / 'flow3d').expanduser().glob('*.nc'))[0]))
+            else:
+                nc_secchi = xr.Dataset()
+            if len(path_weekly_chl_files):
+                nc = xr.open_mfdataset(path_weekly_chl_files,combine='nested',concat_dim='time')
+
+                nc=nc.sel(y=slice(df_raster.y.max(),df_raster.y.min()),x=slice(df_raster.x.min(),df_raster.x.max()),band=1)
+                nc=nc.mean(dim=['time'])
+                #fig, ax = plt.subplots()
+                #plot=plt.pcolormesh(nc.variables['band_data'].data[::-1])
+                #fig.colorbar(plot, ax=ax)
+                nc = nc.rename({'band_data': 'chlorophyll_concentration'})
+                nc= nc.regrid.linear(xr.open_dataset(list(Path(path_to_git / 'data' / 'datafiles' / 'alplakes' / 'flow3d').expanduser().glob('*.nc'))[0]))
+            else:
+                nc = xr.Dataset()
+            # Merge
+            geo_grid=xr.merge([nc_secchi, nc,nc_turbidity])
+            #fig, ax = plt.subplots()
+            #plot=ax.pcolormesh(geo_grid.coords['x'].data,geo_grid.coords['y'].data[::-1],geo_grid.chlorophyll_concentration.data[::-1],cmap='twilight')
+            #fig.colorbar(plot, ax=ax)
+
+            x, y = transformer_ws_to_ch.transform(
+                geo_grid.to_dataframe().reset_index().drop_duplicates(['x', 'y']).x.tolist(),
+                geo_grid.to_dataframe().reset_index().drop_duplicates(['x', 'y']).y.tolist())
+            geo_grid = geo_grid.assign_attrs(swiss_coordinates_x=x, swiss_coordinates_y=y)
+
+            geo_grid =geo_grid.assign_coords({'time':('time',[pd.to_datetime(datetime.datetime.strptime(week+'-1','%Y-%m %U-%w').strftime('%Y-%m-%d'))])})
+            nc_turbidity.close()
+            nc_secchi.close()
+            nc.close()
 
             # fig, ax = plt.subplots()
-            # plot=ax.pcolormesh(geo_grid.coords['x'].data,geo_grid.coords['y'].data[::-1],geo_grid.temperature.data[0,::-1],cmap='twilight')
+            # plot=ax.pcolormesh(np.array(geo_grid.attrs['swiss_coordinates_x']).reshape(geo_grid.dims['y'],geo_grid.dims['x']),np.array(geo_grid.attrs['swiss_coordinates_y']).reshape(geo_grid.dims['y'],geo_grid.dims['x'])[::-1],geo_grid.chlorophyll_concentration.data[::-1],cmap='twilight')
             # fig.colorbar(plot, ax=ax)
-            # ax.set_title(pd.to_datetime(nc.variables['time'].values[time_index].tolist())[0])
+
+
+            geo_grid=geo_grid.reset_coords('band',drop=True)
+            geo_grid = geo_grid.reset_coords('spatial_ref', drop=True)
+            nc_grid=xr.concat([nc_grid,geo_grid],dim='time',compat='no_conflicts') if week!=df_metadata.week.unique()[0] else geo_grid
+    nc_grid.variables['chlorophyll_concentration'].attrs['units'], nc_grid.variables['chlorophyll_concentration'].attrs['long_name'] = 'milligram chlorophyll per cubic meter', 'Surface chlorophyll-a concentration'
+    nc_grid.variables['secchi_depth'].attrs['units'], nc_grid.variables['secchi_depth'].attrs[ 'long_name'] = 'meter', 'Secchi depth'
+    nc_grid.variables['turbidity'].attrs['units'], nc_grid.variables['turbidity'].attrs['long_name'] = 'FNU', 'Turbidity'
+    nc_grid=nc_grid.transpose('time','y','x')
+    nc_grid.to_netcdf('{}/sentinel_{}_{}.nc'.format(path_output,str(nc_grid.coords['time'].data[0])[0:10],str(nc_grid.coords['time'].data[-1])[0:10]))
+
+    fig, ax = plt.subplots()
+    plot=plt.pcolormesh(nc_grid.mean(dim=['time']).coords['x'].data,nc_grid.mean(dim=['time']).coords['y'].data,nc_grid.mean(dim=['time']).chlorophyll_concentration.data[:])
+    fig.colorbar(plot, ax=ax)
+    nc_grid.mean(dim=['time']).to_netcdf('{}/sentinel_{}.nc'.format(path_output,year+'-'+month))
+
+    return nc_grid
 
 
 def flow3D_rasterize(nc,time_index,depth_index=-1,grid_resolution=0.002):
@@ -212,9 +286,11 @@ def flow3D_rasterize(nc,time_index,depth_index=-1,grid_resolution=0.002):
 
         nc=nc.isel(KMAXOUT_RESTR=depth_indexor,KMAXOUT=depth_indexor)
         depth='bottom depth'
+
     else:
         nc = nc.isel(KMAXOUT_RESTR=depth_index,KMAXOUT=depth_indexor)
         depth=(np.array(nc.variables["ZK_LYR"][:]) * -1)[depth_index]
+
 
 
     # Extract u and v velocities and rotate
@@ -240,6 +316,7 @@ def flow3D_rasterize(nc,time_index,depth_index=-1,grid_resolution=0.002):
                                   'water_density':nc.variables["RHO"][time_index, :].data.reshape(np.prod(lon.shape)*len(time_index)),# in kilogram per cubic meter
                                    'velocity_magnitude': velocity_magnitude.reshape(np.prod(lon.shape)*len(time_index))})# in meter per second
     df_coords_untf[df_coords_untf == -999] = pd.NA
+
 
     # Add mask according to bathymetry
     #df_mask=pd.concat(list(map(lambda time:(pd.concat([( nc_bathy.z < -15).to_dataframe().reset_index().query('z==False').rename(columns={'x': 'lon', 'y': 'lat'}),pd.DataFrame(dict(zip(df_coords_untf.drop(columns=['time', 'lon', 'lat', 'depth']).columns,[np.nan] * len(df_coords_untf.drop(columns=['time', 'lon', 'lat', 'depth']).columns))),index=[0])], axis=1).assign( time=time, depth=depth))[df_coords_untf.columns],df_coords_untf.dropna(subset=['time']).time.unique()))).reset_index(drop=True)
@@ -297,7 +374,8 @@ def flow3D_rasterize(nc,time_index,depth_index=-1,grid_resolution=0.002):
     return geo_grid
 
 def download_flow3D_data(year='2024',month='06',path_output=path_to_git / 'data' / 'datafiles' / 'alplakes' / 'flow3d'):
-    sundays=pd.date_range(start=str(int(float(year)))+'-'+month.zfill(2), end=str(int(float(year) ))+'-'+str(int(float(month) + 1)).zfill(2), freq='W-SUN').strftime('%Y%m%d').tolist()
+
+    sundays=pd.date_range(start=str(int(float(year) ))+'-'+month.zfill(2), end=str(int(float(year)+float(month)//12))+'-'+str(int(np.where(float(month)<12,float(month) + 1,1))).zfill(2), freq='W-SUN').strftime('%Y%m%d').tolist()
     nc_grid=xr.Dataset()
     with requests.Session() as session:
         for sunday in sundays:
@@ -308,7 +386,7 @@ def download_flow3D_data(year='2024',month='06',path_output=path_to_git / 'data'
                 with open(path_to_file, "wb") as f:
                     for a_chunk in rsp.iter_content(chunk_size=131072):  # Loop over content, i.e. eventual HTTP chunks
                         f.write(a_chunk)
-            # Open and resterize model ouptput
+            # Open and rasterize model ouptput
             nc= xr.open_mfdataset(path_to_file)
             #depth_index = get_closest_index(3.8, np.array(nc.variables["ZK_LYR"][:]) * -1)
             #date_values = nc.variables['time'][:].data
@@ -327,7 +405,8 @@ def download_flow3D_data(year='2024',month='06',path_output=path_to_git / 'data'
             #ax.set_title(masked_geo_grid.variables['time'][-1].values)
             nc_grid=xr.merge([nc_grid,masked_geo_grid],combine_attrs='drop_conflicts')
 
-    nc_grid.to_netcdf('{}/{}.nc'.format(path_to_file.parent,path_to_file.stem[:-2]))
+    nc_grid.to_netcdf('{}/delft3d-flow_geneva_{}_daily.nc'.format(path_to_file.parent,year+month))
+    nc_grid.mean(dim=['time']).to_netcdf('{}/delft3d-flow_geneva_{}.nc'.format(path_to_file.parent,year+month))
 
     return nc_grid
 

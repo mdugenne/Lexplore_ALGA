@@ -134,6 +134,7 @@ def scatter_2d_images(df_directory,axis_dict):
         """
 
         df=pd.read_csv(r'{}'.format(df_directory)).rename(columns=axis_dict)
+        df=df.dropna(subset=['images'])
         dbscan = DBSCAN(eps=0.95, min_samples=5,leaf_size=12)
         cluster=dbscan.fit(df[['x','y']].to_numpy())
         lof = LocalOutlierFactor(n_neighbors=10)
