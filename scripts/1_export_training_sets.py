@@ -53,6 +53,13 @@ df_ecotaxa=df_ecotaxa.rename(columns={df_ecotaxa.columns[0]:'object_id'})
 df_ecotaxa=pd.merge(df_ecotaxa,df_taxonomy,how='left',left_on='object_annotation_category',right_on='Ecotaxa_annotation_category')
 df_ecotaxa.query('object_annotation_category=="Planktothrix"')[['object_equivalent_diameter_area','object_axis_minor_length','object_axis_major_length']].agg(['mean','std']).T
 
+
+# Prepare input files for computer vision machine learning tasks
+## Instance segmentation(i.e. outline parasite / host in raw frames)
+
+
+
+# Plot time-series
 # Relative abundance of main phytoplankton classes
 natsorted(df_ecotaxa.Class.unique())
 

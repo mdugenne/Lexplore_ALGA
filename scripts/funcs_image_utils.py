@@ -1,3 +1,12 @@
+import warnings
+warnings.filterwarnings('ignore')
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+import timm
+from sklearn.model_selection import StratifiedKFold
 import cv2
 import torch #pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 import torch.nn as nn
@@ -43,16 +52,25 @@ if 'ecotaxa_initial_classification_id' in cfg_metadata.keys():
 path_to_network=Path("{}:{}".format(cfg_metadata['local_network'],os.path.sep)) # Set working directory to forel-meco
 path_to_ecotaxa_cytosense_files=Path(path_to_network /'lexplore' / 'LeXPLORE' / 'ecotaxa'  )
 path_to_ecotaxa_flowcam_files=Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data'  / 'Lexplore' / 'ecotaxa'  )
-df_context_flowcam_micro=pd.read_csv(r'{}'.format(cfg_metadata['flowcam_10x_context_file']),sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains(r"\[",case=True)').set_index('Name').T.rename(index={'Value':Path(cfg_metadata['flowcam_10x_context_file']).stem})
-df_context_flowcam_macro=pd.read_csv(r'{}'.format(cfg_metadata['flowcam_macro_context_file']),sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains(r"\[",case=True)').set_index('Name').T.rename(index={'Value':Path(cfg_metadata['flowcam_macro_context_file']).stem})
+
+df_context=pd.DataFrame({'pixel_size':[cfg_metadata['pixel_size_flowcam_macro'],cfg_metadata['pixel_size_flowcam_10x'],cfg_metadata['pixel_size_cytosense']]},index=['context_flowcam_2mm_lexplore','context_flowcam_10x_lexplore','context_cytosense_lexplore'])
+df_context.loc[ 'context_flowcam_2mm_lexplore', ['AcceptableTop', 'AcceptableLeft', 'AcceptableBottom', 'AcceptableRight']]=10,80,1850,1125
+df_context.loc[ 'context_flowcam_10x_lexplore', ['AcceptableTop', 'AcceptableLeft', 'AcceptableBottom', 'AcceptableRight']]=1,115,1919,1085
+df_context.loc[ 'context_cytosense_lexplore', ['AcceptableTop', 'AcceptableLeft', 'AcceptableBottom', 'AcceptableRight']] = 0, 0, cfg_metadata['height_cytosense'], cfg_metadata['width_cytosense']
+
+#df_context_flowcam_micro=pd.read_csv(r'{}'.format(cfg_metadata['flowcam_10x_context_file']),sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains(r"\[",case=True)').set_index('Name').T.rename(index={'Value':Path(cfg_metadata['flowcam_10x_context_file']).stem})
+#df_context_flowcam_macro=pd.read_csv(r'{}'.format(cfg_metadata['flowcam_macro_context_file']),sep=r'\=|\t',engine='python',encoding='latin-1',names=['Name','Value']).query('not Name.str.contains(r"\[",case=True)').set_index('Name').T.rename(index={'Value':Path(cfg_metadata['flowcam_macro_context_file']).stem})
 # Remove duplicated columns
-df_context_flowcam_macro=df_context_flowcam_macro.loc[:,~df_context_flowcam_macro.columns.duplicated()].copy()
-df_context_flowcam_micro=df_context_flowcam_micro.loc[:,~df_context_flowcam_micro.columns.duplicated()].copy()
+#df_context_flowcam_macro=df_context_flowcam_macro.loc[:,~df_context_flowcam_macro.columns.duplicated()].copy()
+#df_context_flowcam_micro=df_context_flowcam_micro.loc[:,~df_context_flowcam_micro.columns.duplicated()].copy()
 # Merge in a single context file
-df_context=pd.concat([pd.concat([df_context_flowcam_micro,pd.DataFrame(dict(zip([column for column in df_context_flowcam_macro.columns if column not in df_context_flowcam_micro.columns],[pd.NA]*len([column for column in df_context_flowcam_macro.columns if column not in df_context_flowcam_micro.columns]))),index=df_context_flowcam_micro.index)],axis=1),pd.concat([df_context_flowcam_macro,pd.DataFrame(dict(zip([column for column in df_context_flowcam_micro.columns if column not in df_context_flowcam_macro.columns],[pd.NA]*len([column for column in df_context_flowcam_micro.columns if column not in df_context_flowcam_macro.columns]))),index=df_context_flowcam_macro.index)],axis=1)],axis=0)
+#df_context=pd.concat([pd.concat([df_context_flowcam_micro,pd.DataFrame(dict(zip([column for column in df_context_flowcam_macro.columns if column not in df_context_flowcam_micro.columns],[pd.NA]*len([column for column in df_context_flowcam_macro.columns if column not in df_context_flowcam_micro.columns]))),index=df_context_flowcam_micro.index)],axis=1),pd.concat([df_context_flowcam_macro,pd.DataFrame(dict(zip([column for column in df_context_flowcam_micro.columns if column not in df_context_flowcam_macro.columns],[pd.NA]*len([column for column in df_context_flowcam_micro.columns if column not in df_context_flowcam_macro.columns]))),index=df_context_flowcam_macro.index)],axis=1)],axis=0)
 
 def resize_to_square(image, size):
-    h, w, d = image.shape
+    if len(image.shape)==3:
+        h, w, d = image.shape
+    else:
+        h, w = image.shape
     ratio = size / max(h, w)
     resized_image = cv2.resize(image, (int( max(h, w)*ratio), int( max(h, w)*ratio)), cv2.INTER_AREA)
     return resized_image
@@ -64,7 +82,10 @@ def image_to_tensor(image, normalize=None):
     return tensor
 
 def pad(image, min_height, min_width):
-    h,w,d = image.shape
+    if len(image.shape) == 3:
+        h, w, d = image.shape
+    else:
+        h, w = image.shape
 
     if h < min_height:
         h_pad_top = int((min_height - h) / 2.0)
@@ -79,9 +100,173 @@ def pad(image, min_height, min_width):
     else:
         w_pad_left = 0
         w_pad_right = 0
+    padded_image=cv2.copyMakeBorder(image, h_pad_top, h_pad_bottom, w_pad_left, w_pad_right, cv2.BORDER_CONSTANT, value=(0,0,0)) if len(image.shape) == 3 else cv2.copyMakeBorder(image, h_pad_top, h_pad_bottom, w_pad_left, w_pad_right, cv2.BORDER_CONSTANT, value=(0,0))
+    return padded_image
 
-    return cv2.copyMakeBorder(image, h_pad_top, h_pad_bottom, w_pad_left, w_pad_right, cv2.BORDER_CONSTANT, value=(0,0,0))
+# Image augmentation
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
+# Modeling
+SEED = 5
+NUM_WORKERS = 2
+BATCH_SIZE = 8
+LR = 0.005
+input_shape=(224, 224, 3)
+EPOCHS=5
+import random
+def seed_everything(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
+
+
+# Set seed
+seed_everything(SEED)
+
+def show_validation_score(train_acc_list, train_loss_list, valid_acc_list, valid_loss_list,save_dir, save_name='classification_validation_score.pdf', save=False):
+    fig = plt.figure(figsize=(15, 15))
+    for i in range(FOLD_NUM):
+        train_acc = train_acc_list[i]
+        train_loss = train_loss_list[i]
+        valid_acc = valid_acc_list[i]
+        valid_loss = valid_loss_list[i]
+
+        ax = fig.add_subplot(math.ceil(np.sqrt(FOLD_NUM)) * 2, math.ceil(np.sqrt(FOLD_NUM)) * 2, (i * 2) + 1,
+                             title=f'Fold {i + 1}')
+        ax.plot(range(EPOCHS), train_acc, c='orange', label='train')
+        ax.plot(range(EPOCHS), valid_acc, c='blue', label='valid')
+        ax.set_xlabel('epoch')
+        ax.set_ylabel('accuracy')
+        ax.legend()
+
+        ax = fig.add_subplot(math.ceil(np.sqrt(FOLD_NUM)) * 2, math.ceil(np.sqrt(FOLD_NUM)) * 2, (i * 2) + 2,
+                             title=f'Fold {i + 1}')
+        ax.plot(range(EPOCHS), train_loss, c='orange', label='train')
+        ax.plot(range(EPOCHS), valid_loss, c='blue', label='valid')
+        ax.set_xlabel('epoch')
+        ax.set_ylabel('loss')
+        ax.legend()
+
+    plt.tight_layout()
+    if save:
+        os.makedirs(save_dir, exist_ok=True)
+        plt.savefig(save_dir + save_name,dpi=300,bbox_inches='tight')
+    else:
+        plt.show()
+
+
+def load_img(path):
+    #img_bgr = cv2.imread(path)
+    #img_rgb = img_bgr[:, :, ::-1]
+    image = cv2.imread(path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image=(image / np.where(image.dtype == np.uint8,255.,1)).astype(np.float32)
+
+    return image
+
+
+#Define Image Transformations and Augmentations
+# Image Augmentation
+def transform_train():
+    transform = [
+        A.LongestMaxSize(max_size=input_shape[0],interpolation=1,p=1),
+        A.PadIfNeeded(min_height=input_shape[0], min_width=input_shape[0], border_mode=cv2.BORDER_CONSTANT, value=(0,0,0),p=1),
+        A.Normalize(normalization='standard', p=1),
+        #A.Resize(input_shape[0],input_shape[1],p=1),
+        A.HorizontalFlip(p=0.5),
+        A.ShiftScaleRotate(p=0.5),
+        A.CoarseDropout(p=0.5),
+        ToTensorV2(p=1.0)
+    ]
+    return A.Compose(transform,seed=SEED)
+
+
+# Validation (and test) images should only be resized.
+def transform_valid():
+    transform = [
+        A.LongestMaxSize(max_size=input_shape[0], interpolation=1,p=1),
+        A.PadIfNeeded(min_height=input_shape[0], min_width=input_shape[0], border_mode=cv2.BORDER_CONSTANT,value=(0, 0, 0),p=1),
+        A.Normalize(normalization='standard', p=1),
+        #A.Resize(input_shape[0],input_shape[1],p=1),
+        ToTensorV2(p=1.0)
+    ]
+    return A.Compose(transform,seed=SEED)
+
+# Define the Dataset
+
+class CNNDataset(Dataset):
+    def __init__(self, df, data_root, transforms=None, give_label=True):
+        """Performed only once when the Dataset object is instantiated.
+        give_label should be False for test data
+        """
+        super().__init__()
+        self.df = df.reset_index(drop=True).copy()
+        self.data_root = data_root
+        self.transforms = transforms
+        self.give_label = give_label
+
+        if give_label == True:
+            self.labels = self.df['class_id'].values
+
+    def __len__(self):
+        """Function to return the number of records in the dataset
+        """
+        return self.df.shape[0]
+
+    def __getitem__(self, index):
+        """Function to return samples corresponding to a given index from a dataset
+        """
+        # get labels
+        if self.give_label:
+            target = self.labels[index]
+
+        # Load images
+
+        img = load_img(f'{self.data_root}/{self.df.loc[index]["image_id"]}').astype(np.float32)
+
+
+
+        # Transform images
+        if self.transforms:
+            img = self.transforms(image=img)['image']
+
+        if self.give_label == True:
+            return img, target
+        else:
+            return img
+
+# Define the DataLoader
+def create_dataloader(df, trn_idx, val_idx,train_path):
+    train_ = df.loc[trn_idx,:].reset_index(drop=True)
+    valid_ = df.loc[val_idx,:].reset_index(drop=True)
+
+
+    # Dataset
+    train_datasets = CNNDataset(train_, train_path, transforms=transform_train())
+    valid_datasets = CNNDataset(valid_,train_path, transforms=transform_valid())
+
+    # Data Loader
+    train_loader = DataLoader(train_datasets, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, shuffle=True) #, multiprocessing_context='fork'
+    valid_loader = DataLoader(valid_datasets, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, shuffle=False)#, multiprocessing_context='fork'
+
+    return train_loader, valid_loader
+
+# Define the Model
+import timm
+timm.list_models('*efficient*',pretrained=True)
+class EfficientNet_V2(nn.Module):
+    def __init__(self, n_out):
+        super(EfficientNet_V2, self).__init__()
+        # Define model
+        self.effnet = timm.create_model('tf_efficientnetv2_s.in1k', pretrained=True, num_classes=n_out)
+
+    def forward(self, x):
+        return self.effnet(x)
 
 class image_Dataset(torch.utils.data.Dataset):
 
@@ -189,10 +374,6 @@ def images_to_dataset(image_path,filter,image_extension='.jpg'):
     if len(filter):
         images=[image for image in images if image.stem+'.jpg' in filter.tolist()]
     df_path=pd.DataFrame({'ID':[path.stem for path in images],'path':[str(path) for path in images]})
-    df_context.loc['context_flowcam_2mm_lexplore','pixel_size']=cfg_metadata['pixel_size_flowcam_macro']
-    df_context.loc['context_flowcam_10x_lexplore', 'pixel_size'] = cfg_metadata['pixel_size_flowcam_10x']
-    df_context.loc['context_cytosense_lexplore', 'pixel_size'] = cfg_metadata['pixel_size_cytosense']
-    df_context.loc['context_cytosense_lexplore', ['AcceptableTop','AcceptableLeft','AcceptableBottom','AcceptableRight']] = 0,0,cfg_metadata['height_cytosense'],cfg_metadata['width_cytosense']
     id_instrument=[parent in str(Path(image_path)) for parent in [str(Path(r'{}\\Flowcam_10x'.format(Path(image_path).parent))),str(Path(r'{}\\Flowcam_2mm'.format(Path(image_path).parent))),str(Path(r"R:\lexplore\LeXPLORE\ecotaxa"))]]
     pixel_size=df_context.loc[id_instrument, 'pixel_size'].values[0]
     max_size = int(np.max([(df_context.loc[id_instrument].AcceptableBottom.astype(float) - df_context.loc[ id_instrument].AcceptableTop.astype(float)) * pixel_size, (df_context.loc[id_instrument].AcceptableRight.astype(float) - df_context.loc[ id_instrument].AcceptableLeft.astype(float)) * pixel_size]))  # int(np.max([(df_context.AcceptableBottom.astype(float)-df_context.AcceptableTop.astype(float))*df_context.pixel_size,(df_context.AcceptableRight.astype(float)-df_context.AcceptableLeft.astype(float))*df_context.pixel_size]))

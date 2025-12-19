@@ -1,7 +1,10 @@
 ## Objective: This script generates summary data and figures from the database available at https://si-ola.inrae.fr/si_lacs/index.jsf#
 # Load modules and functions required for image processing
+import warnings
+warnings.filterwarnings('ignore')
 import numpy as np
-
+import matplotlib
+matplotlib.use('TkAgg')
 try:
     from funcs_image_processing import *
 
@@ -44,6 +47,8 @@ for variable, legend in {'Temperature':r'$\text{Temperature (}^{\degree})$C',
                          'Phosphore_Total': r'$\text{Total phosphorus} \text{ concentration (mg/L)}$',
                          'Silice': r'$\text{SiO}_{2} \text{ concentration (mg L}^{-1}$)'}.items():
     # Long-term environmental timeseries
+    fig, axes = plt.subplots(1, 1,frameon=False)  # figsize=tuple(np.array(padded_image.shape)[0:2][::-1]*40/300),dpi=300
+
     plot = (ggplot(df_env.query('depth_min==5').dropna(subset=[variable])) +
             geom_line(mapping=aes(x='datetime', y=variable)) +
             scale_y_continuous(minor_breaks=4)+

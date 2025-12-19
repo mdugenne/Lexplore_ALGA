@@ -1,8 +1,8 @@
 ## Objective: This script includes all modules and functions required for image processing
 
 import warnings
-warnings.filterwarnings(action='ignore')
-warnings.filterwarnings(action='ignore',category=SyntaxWarning)
+warnings.filterwarnings('ignore')
+
 # Image processing modules
 import skimage as ski #pip install -U scikit-image
 from skimage import color,measure,morphology
@@ -125,11 +125,16 @@ from ecotaxa_py_client.models.export_req import ExportReq
 from ecotaxa_py_client.api import jobs_api
 
 ## Step 1: Create an Ecotaxa API instance based on authentication infos.
-with ecotaxa_py_client.ApiClient() as client:
-    api = AuthentificationApi(client)
-    token = api.login(LoginReq(username=cfg_logon['login_ecotaxa'], password=cfg_logon['password_ecotaxa']))
-configuration = ecotaxa_py_client.Configuration(host="https://ecotaxa.obs-vlfr.fr/api", access_token=token)
-configuration.verify_ssl = False
+try:
+    with ecotaxa_py_client.ApiClient() as client:
+        api = AuthentificationApi(client)
+        token = api.login(LoginReq(username=cfg_logon['login_ecotaxa'], password=cfg_logon['password_ecotaxa']))
+    configuration = ecotaxa_py_client.Configuration(host="https://ecotaxa.obs-vlfr.fr/api", access_token=token)
+    configuration.verify_ssl = False
+except:
+    configuration=ecotaxa_py_client.Configuration(host="https://ecotaxa.obs-vlfr.fr/api")
+    print('EcoTaxa configuration failed, please check EcoTaxa server')
+
 
 # create_ecotaxa_user()
 def create_ecotaxa_user(ecotaxa_configuration=ecotaxa_py_client.Configuration(host="https://ecotaxa.obs-vlfr.fr/api"),user_config={'name':cfg_metadata['principal_investigator'],'email':'Bastiaan.Ibelings@unige.ch'}):
@@ -248,7 +253,7 @@ def create_ecotaxa_project(ecotaxa_configuration=configuration,project_config={'
     return project_id # ID of the newly created project
 
 
-def upload_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_path):
+def upload_thumbnails_ecotaxa_project(configuration,project_id,source_path):
     """
       Objective: This function uploads zip datafiles on Ecotaxa (https://ecotaxa.obs-vlfr.fr)
       Documentation available at : https://github.com/ecotaxa/ecotaxa_py_client/blob/main/docs/ProjectsApi.md#simple_import, https://github.com/ecotaxa/ecotaxa_py_client/blob/main/docs/ImportReq.md
@@ -261,44 +266,39 @@ def upload_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_pa
     # Step 1 : Search for zip files in the source_path directory
     datafiles=[Path(source_path).expanduser()] if Path(source_path).expanduser().exists() else list(Path(source_path).expanduser().glob('*.zip'))
     if len(datafiles):
-        with ecotaxa_py_client.ApiClient(ecotaxa_configuration) as api_client:
+        with ecotaxa_py_client.ApiClient(configuration) as api_client:
             # Create the necessary file (zip files should be temporarily stored on Ecotaxa ftp server), job (task), project (update) instances of the API
             api_instance_files = ecotaxa_py_client.FilesApi(api_client)
             api_instance_jobs = ecotaxa_py_client.JobsApi(api_client)
             api_instance = ecotaxa_py_client.ProjectsApi(api_client)
-            with tqdm( desc='Working on project upload (https://ecotaxa.obs-vlfr.fr/prj/{})'.format(str(project_id)),total=len(datafiles), bar_format='{desc}{bar}', position=0, leave=True) as bar:
-                for file in datafiles:
+            for file in datafiles:
 
-                    try:
-                        # Step 2:Upload zip file to create import task request
-                        api_response_file = api_instance_files.post_user_file(file=str(file),path=str(file),  tag='datafiles_project_{}'.format(project_id))
-                        import_project_req = ImportReq(source_path=api_response_file, taxo_mappings=None,skip_loaded_files=True, skip_existing_objects=True)
-                        # Step 3: Creating a task (job) to upload the zip file adn append the data to the existing project
-                        api_response = api_instance.import_file(project_id, import_req=import_project_req)
-                        job_id = api_response.job_id
+                try:
+                    # Step 2:Upload zip file to create import task request
+                    # Note l.854 in files_api.py of ecotaxa API module should be switched to resource_path='/user_files/'
+                    api_response_file = api_instance_files.post_user_file(file=str(file))
+                    import_project_req =ImportReq(source_path=Path(file).expanduser().stem, taxo_mappings=None,skip_loaded_files=True, skip_existing_objects=True)
+                    # Step 3: Creating a task (job) to upload the zip file adn append the data to the existing project
+                    api_response = api_instance.import_file(project_id, import_req=import_project_req)
+                    job_id = api_response.job_id
 
-                        # Step 4: Check the job status
-                        # Insert a progress bar to allow for the job to be done based on get_job status.
-                        # Attention, the break cannot be timed with job progress=(percentage) due to a small temporal offset between job progress and status
-                        job_status = 'R'  # percent = 0
-                        while job_status not in ('F', 'E'):  # percent!=100:
-                            time.sleep(2)  # Check the job status every 2 seconds. Modify as needed
-                            thread = api_instance_jobs.get_job(job_id)
-                            result = thread
-                            job_status = result.state
-                            # Stop when job status is finished
-                            if job_status == 'F':
-                                break
+                    # Step 4: Check the job status
+                    # Insert a progress bar to allow for the job to be done based on get_job status.
+                    # Attention, the break cannot be timed with job progress=(percentage) due to a small temporal offset between job progress and status
+                    job_status = 'R'  # percent = 0
+                    while job_status not in ('F', 'E'):  # percent!=100:
+                        time.sleep(2)  # Check the job status every 2 seconds. Modify as needed
+                        thread = api_instance_jobs.get_job(job_id)
+                        result = thread
+                        job_status = result.state
+                        # Stop when job status is finished
+                        if job_status == 'F':
+                            break
 
+                except Exception as e:
+                    project_id = None
+                    print("Error updating project using {}. Please check your connection or EcoTaxa server".format(file.stem))
 
-                    except Exception as e:
-                        project_id = None
-                        print("Error updating project using {}. Please check your connection or EcoTaxa server".format(file.stem))
-                    # Step 5: Update the progress bar and move to new zip file
-                    percent = np.round(100 * (bar.n / len(datafiles)), 1)
-                    bar.set_description("Working on project upload {} (%s%%)".format(file.stem) % percent, refresh=True)
-                    # and update progress bar
-                    progress = bar.update(n=1)
         return project_id  # ID of the newly updated project
 
 def update_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_path):
@@ -319,81 +319,76 @@ def update_thumbnails_ecotaxa_project(ecotaxa_configuration,project_id,source_pa
             api_instance_files = ecotaxa_py_client.FilesApi(api_client)
             api_instance_jobs = ecotaxa_py_client.JobsApi(api_client)
             api_instance = ecotaxa_py_client.ProjectsApi(api_client)
-            with tqdm( desc='Working on project update (https://ecotaxa.obs-vlfr.fr/prj/{})'.format(str(project_id)),total=len(datafiles), bar_format='{desc}{bar}', position=0, leave=True) as bar:
-                for file in datafiles:
+            for file in datafiles:
 
-                    try:
-                        # Step 2: Retrieve existing taxonomic assignments for that specific acquisition
-                        api_instance_objects = objects_api.ObjectsApi(api_client)
-                        api_instance_object = ecotaxa_py_client.ObjectApi(api_client)
-                        api_response_samples = ecotaxa_py_client.SamplesApi(api_client).samples_search(project_ids=str(project_id), id_pattern=file.stem)
-                        api_response_objects = api_instance_objects.get_object_set(project_id=int(project_id),project_filters=ProjectFilters(statusfilter="",samples=str(api_response_samples[0].sampleid)),fields="obj.orig_id,txo.display_name,obj.classif_id,obj.classif_qual,obj.classif_who,obj.classif_when,obj.classif_auto_id,obj.classif_auto_score,obj.classif_auto_when,obj.classif_crossvalidation_id")
+                try:
+                    # Step 2: Retrieve existing taxonomic assignments for that specific acquisition
+                    api_instance_objects = objects_api.ObjectsApi(api_client)
+                    api_instance_object = ecotaxa_py_client.ObjectApi(api_client)
+                    api_response_samples = ecotaxa_py_client.SamplesApi(api_client).samples_search(project_ids=str(project_id), id_pattern=file.stem)
+                    api_response_objects = api_instance_objects.get_object_set(project_id=int(project_id),project_filters=ProjectFilters(statusfilter="",samples=str(api_response_samples[0].sampleid)),fields="obj.orig_id,txo.display_name,obj.classif_id,obj.classif_qual,obj.classif_who,obj.classif_when,obj.classif_auto_id,obj.classif_auto_score,obj.classif_auto_when,obj.classif_crossvalidation_id")
 
-                        # Step 3: Append the labels to ecotaxa data table and save the classification history locally
-                        df_objects = pd.DataFrame(api_response_objects.details,columns=['object_origid','object_annotation_category', 'object_annotation_category_id', 'object_annotation_status','object_annotation_person_id','object_annotation_date','object_prediction_id','object_prediction_score','object_prediction_date','object_prediction_cross_validation_id']).assign(object_id=api_response_objects.to_dict().get('object_ids'))
-                        api_response_users=pd.DataFrame(map(lambda user: ecotaxa_py_client.UsersApi(api_client).get_user(user_id=int(user)).to_dict(),df_objects.dropna(subset=['object_annotation_person_id']).object_annotation_person_id.unique())) if len(df_objects.dropna(subset=['object_annotation_person_id'])) else pd.DataFrame({'id':pd.NA},index=[0])
-                        df_objects=pd.merge(df_objects,api_response_users.rename(columns={'name':'object_annotation_person_name','email':'object_annotation_person_email'}),how='left',left_on='object_annotation_person_id',right_on='id')
-                        df_objects=df_objects.assign(object_annotation_status=lambda x: x.object_annotation_status.map({'V':'validated','P':'predicted','D':'dubious'}),object_annotation_time=lambda x: pd.to_datetime(x.object_annotation_date.astype(str),format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore') if pd.to_datetime(df_objects.object_annotation_date.astype(str),format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore').dtype!='O' else pd.NaT)
-                        df_objects['object_annotation_time']=df_objects.object_annotation_time.dt.strftime('%H%M%S')
-                        df_objects=df_objects.assign(object_annotation_date=lambda x: pd.to_datetime(x.object_annotation_date,format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore') if pd.to_datetime(df_objects.object_annotation_date.astype(str),format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore').dtype!='O' else pd.NaT)
-                        df_objects['object_annotation_date']=df_objects.object_annotation_date.dt.strftime('%Y%m%d')
-                        df_history =  pd.DataFrame(map(lambda history: history.to_dict(),list(itertools.chain(*list(map(lambda ID: api_instance_object.object_query_history(object_id=int(ID)),df_objects.object_id.unique()))))))
-                        path_to_file=file.parent /file.stem / 'ecotaxa_table_{}.tsv'.format(file.stem.rstrip().replace(' ','_'))
-                        df_history.to_csv(str(path_to_file).replace('ecotaxa_table_','annotations_table_'), sep='\t', index=False)
-                        df_ecotaxa=pd.read_table(path_to_file,sep='\t',skiprows=1,header=None,dtype=dict_ecotaxa_types)
-                        df_ecotaxa.columns=pd.read_table(path_to_file,sep='\t',nrows=1,header=None).loc[0]
-                        df_ecotaxa.loc[1:,'object_time']=df_ecotaxa.loc[1:,'object_time'].astype(str).str.zfill(6)
-                        df_ecotaxa.loc[1:,'object_date'] = df_ecotaxa.loc[1:,'object_date'].astype(str).str.zfill(6)
-                        df_ecotaxa=pd.merge(df_ecotaxa.astype({'object_id':str})[['object_id']+[column for column in df_ecotaxa.columns if column not in df_objects.columns]],df_objects.astype({'object_origid':str})[[column for column in ['object_origid', 'object_annotation_category', 'object_annotation_status', 'object_annotation_date', 'object_annotation_time', 'object_annotation_person_name', 'object_annotation_person_email', 'object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id'] if column in df_objects.columns]],how='left',left_on='object_id',right_on='object_origid').drop(columns='object_origid')
-                        df_ecotaxa.loc[0,[ 'object_annotation_category', 'object_annotation_status', 'object_annotation_date', 'object_annotation_time', 'object_annotation_person_name', 'object_annotation_person_email', 'object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id']]=['[t]','[t]','[t]','[t]','[t]','[t]','[t]','[f]','[t]','[t]']
-                        df_ecotaxa_update=df_ecotaxa.copy()[['img_file_name']+[column for column in df_ecotaxa.columns if 'object_' in column]+[column for column in df_ecotaxa.columns if 'sample_' in column]+[column for column in df_ecotaxa.columns if 'acq_' in column]+[column for column in df_ecotaxa.columns if 'process_' in column]].drop(columns=['object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id'])
-                        df_ecotaxa_update.to_csv(path_to_file, sep='\t', index=False)
-                        file.unlink(missing_ok=True)
-                        shutil.make_archive(str(path_to_file.parent), 'zip', path_to_file.parent, base_dir=None)
+                    # Step 3: Append the labels to ecotaxa data table and save the classification history locally
+                    df_objects = pd.DataFrame(api_response_objects.details,columns=['object_origid','object_annotation_category', 'object_annotation_category_id', 'object_annotation_status','object_annotation_person_id','object_annotation_date','object_prediction_id','object_prediction_score','object_prediction_date','object_prediction_cross_validation_id']).assign(object_id=api_response_objects.to_dict().get('object_ids'))
+                    api_response_users=pd.DataFrame(map(lambda user: ecotaxa_py_client.UsersApi(api_client).get_user(user_id=int(user)).to_dict(),df_objects.dropna(subset=['object_annotation_person_id']).object_annotation_person_id.unique())) if len(df_objects.dropna(subset=['object_annotation_person_id'])) else pd.DataFrame({'id':pd.NA},index=[0])
+                    df_objects=pd.merge(df_objects,api_response_users.rename(columns={'name':'object_annotation_person_name','email':'object_annotation_person_email'}),how='left',left_on='object_annotation_person_id',right_on='id')
+                    df_objects=df_objects.assign(object_annotation_status=lambda x: x.object_annotation_status.map({'V':'validated','P':'predicted','D':'dubious'}),object_annotation_time=lambda x: pd.to_datetime(x.object_annotation_date.astype(str),format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore') if pd.to_datetime(df_objects.object_annotation_date.astype(str),format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore').dtype!='O' else pd.NaT)
+                    df_objects['object_annotation_time']=df_objects.object_annotation_time.dt.strftime('%H%M%S')
+                    df_objects=df_objects.assign(object_annotation_date=lambda x: pd.to_datetime(x.object_annotation_date,format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore') if pd.to_datetime(df_objects.object_annotation_date.astype(str),format='%Y-%m-%dT%H:%M:%S.%f',errors='ignore').dtype!='O' else pd.NaT)
+                    df_objects['object_annotation_date']=df_objects.object_annotation_date.dt.strftime('%Y%m%d')
+                    df_history =  pd.DataFrame(map(lambda history: history.to_dict(),list(itertools.chain(*list(map(lambda ID: api_instance_object.object_query_history(object_id=int(ID)),df_objects.object_id.unique()))))))
+                    path_to_file=file.parent /file.stem / 'ecotaxa_table_{}.tsv'.format(file.stem.rstrip().replace(' ','_'))
+                    df_history.to_csv(str(path_to_file).replace('ecotaxa_table_','annotations_table_'), sep='\t', index=False)
+                    df_ecotaxa=pd.read_table(path_to_file,sep='\t',skiprows=1,header=None,dtype=dict_ecotaxa_types)
+                    df_ecotaxa.columns=pd.read_table(path_to_file,sep='\t',nrows=1,header=None).loc[0]
+                    df_ecotaxa.loc[1:,'object_time']=df_ecotaxa.loc[1:,'object_time'].astype(str).str.zfill(6)
+                    df_ecotaxa.loc[1:,'object_date'] = df_ecotaxa.loc[1:,'object_date'].astype(str).str.zfill(6)
+                    df_ecotaxa=pd.merge(df_ecotaxa.astype({'object_id':str})[['object_id']+[column for column in df_ecotaxa.columns if column not in df_objects.columns]],df_objects.astype({'object_origid':str})[[column for column in ['object_origid', 'object_annotation_category', 'object_annotation_status', 'object_annotation_date', 'object_annotation_time', 'object_annotation_person_name', 'object_annotation_person_email', 'object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id'] if column in df_objects.columns]],how='left',left_on='object_id',right_on='object_origid').drop(columns='object_origid')
+                    df_ecotaxa.loc[0,[ 'object_annotation_category', 'object_annotation_status', 'object_annotation_date', 'object_annotation_time', 'object_annotation_person_name', 'object_annotation_person_email', 'object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id']]=['[t]','[t]','[t]','[t]','[t]','[t]','[t]','[f]','[t]','[t]']
+                    df_ecotaxa_update=df_ecotaxa.copy()[['img_file_name']+[column for column in df_ecotaxa.columns if 'object_' in column]+[column for column in df_ecotaxa.columns if 'sample_' in column]+[column for column in df_ecotaxa.columns if 'acq_' in column]+[column for column in df_ecotaxa.columns if 'process_' in column]].drop(columns=['object_prediction_id', 'object_prediction_score','object_prediction_date', 'object_prediction_cross_validation_id'])
+                    df_ecotaxa_update.to_csv(path_to_file, sep='\t', index=False)
+                    file.unlink(missing_ok=True)
+                    shutil.make_archive(str(path_to_file.parent), 'zip', path_to_file.parent, base_dir=None)
 
-                        # Step 4: Erase objects, otherwise the thumbnails cannot be updated through regular import method
-                        confirmation=input('Updating thumbnails, data, and metadata for acquisition {}. Would you like to quit (press enter) or continue (type continue)'.format(file.stem))
-                        if confirmation=='':
-                            continue
-                        api_response_erase_objects=api_instance_objects.erase_object_set(request_body=list(map(int,df_objects.object_id.astype(int).unique())))
+                    # Step 4: Erase objects, otherwise the thumbnails cannot be updated through regular import method
+                    confirmation=input('Updating thumbnails, data, and metadata for acquisition {}. Would you like to quit (press enter) or continue (type continue)'.format(file.stem))
+                    if confirmation=='':
+                        continue
+                    api_response_erase_objects=api_instance_objects.erase_object_set(request_body=list(map(int,df_objects.object_id.astype(int).unique())))
 
-                        # Step 5: Upload zip file to create import task request
-                        api_response_file = api_instance_files.post_user_file(file=str(file),  tag='datafiles_project_{}'.format(project_id))
+                    # Step 5: Upload zip file to create import task request
+                    api_response_file = api_instance_files.post_user_file(file=str(file),  tag='datafiles_project_{}'.format(project_id))
 
-                        # Step 6: Creating a task (job) to upload the zip file with pre-existing labels
-                        import_project_req = ImportReq(source_path=api_response_file, taxo_mappings=None,skip_loaded_files=False, skip_existing_objects=True)
-                        api_response = api_instance.import_file(project_id, import_req=import_project_req)
-                        job_id = api_response.job_id
+                    # Step 6: Creating a task (job) to upload the zip file with pre-existing labels
+                    import_project_req = ImportReq(source_path=api_response_file, taxo_mappings=None,skip_loaded_files=False, skip_existing_objects=True)
+                    api_response = api_instance.import_file(project_id, import_req=import_project_req)
+                    job_id = api_response.job_id
 
-                        # Step 7: Check the job status
-                        # Insert a progress bar to allow for the job to be done based on get_job status.
-                        # Attention, the break cannot be timed with job progress=(percentage) due to a small temporal offset between job progress and status
-                        job_status = 'R'  # percent = 0
-                        while job_status not in ('F', 'E'):  # percent!=100:
-                            time.sleep(2)  # Check the job status every 2 seconds. Modify as needed
-                            thread = api_instance_jobs.get_job(job_id)
-                            result = thread
-                            job_status = result.state
-                            # Stop when job status is finished
-                            if job_status == 'F':
-                                break
-                        # Step 8: Update sample infos
-                        for sample in api_response_samples:
-                            bulk_update_req = ecotaxa_py_client.BulkUpdateReq(target_ids=[sample.sampleid],updates=[{'ucol':key,'uval':value}  for key,value in df_ecotaxa_update.query('sample_id=="{}"'.format(sample.orig_id)).reset_index(drop=True).loc[0,[column for column in df_ecotaxa_update.columns if 'sample' in column]].to_dict().items()])
-                            api_instance_samples=ecotaxa_py_client.SamplesApi(api_client)
-                            api_response = api_instance_samples.update_samples(bulk_update_req)
+                    # Step 7: Check the job status
+                    # Insert a progress bar to allow for the job to be done based on get_job status.
+                    # Attention, the break cannot be timed with job progress=(percentage) due to a small temporal offset between job progress and status
+                    job_status = 'R'  # percent = 0
+                    while job_status not in ('F', 'E'):  # percent!=100:
+                        time.sleep(2)  # Check the job status every 2 seconds. Modify as needed
+                        thread = api_instance_jobs.get_job(job_id)
+                        result = thread
+                        job_status = result.state
+                        # Stop when job status is finished
+                        if job_status == 'F':
+                            break
+                    # Step 8: Update sample infos
+                    for sample in api_response_samples:
+                        bulk_update_req = ecotaxa_py_client.BulkUpdateReq(target_ids=[sample.sampleid],updates=[{'ucol':key,'uval':value}  for key,value in df_ecotaxa_update.query('sample_id=="{}"'.format(sample.orig_id)).reset_index(drop=True).loc[0,[column for column in df_ecotaxa_update.columns if 'sample' in column]].to_dict().items()])
+                        api_instance_samples=ecotaxa_py_client.SamplesApi(api_client)
+                        api_response = api_instance_samples.update_samples(bulk_update_req)
 
-                    except Exception as e:
-                        project_id = None
-                        print("Error updating project {} using {}. Please check your connection or EcoTaxa server".format(str(project_id)+' (https://ecotaxa.obs-vlfr.fr/prj/{})'.format(str(project_id)),file.stem))
-                    # Step 8: Update the progress bar and move to new zip file
-                    percent = np.round(100 * (bar.n / len(datafiles)), 1)
-                    bar.set_description("Working on project update {} (%s%%)".format(file.stem) % percent, refresh=True)
-                    # and update progress bar
-                    progress = bar.update(n=1)
+                except Exception as e:
+                    project_id = None
+                    print("Error updating project {} using {}. Please check your connection or EcoTaxa server".format(str(project_id)+' (https://ecotaxa.obs-vlfr.fr/prj/{})'.format(str(project_id)),file.stem))
+
         return project_id  # ID of the newly updated project
 
-def delete_thumbnail_ecotaxa_project(ecotaxa_configuration=configuration,project_id=int(cfg_metadata['ecotaxa_lexplore_alga_flowcam_micro_projectid']),criteria={'samples':'Flowcam_10x_lexplore_wasam_20250308_2025-03-21'}):
+def delete_thumbnail_ecotaxa_project(ecotaxa_configuration=configuration,project_id=int(cfg_metadata['ecotaxa_lexplore_alga_flowcam_micro_projectid']),criteria={'samples':'Flowcam_10x_lexplore_wasam_20250901_2025-09-16'}):
     """
       Objective: This function uses default option to export datatables on Ecotaxa (https://ecotaxa.obs-vlfr.fr)
       :param configuration: An API instance specifying the host (Ecotaxa url) and the token generated based on Ecotaxa credentials
@@ -541,6 +536,64 @@ def check_ecotaxa_annotations(ecotaxa_configuration=configuration,project_id=str
             print('Error extracting project taxonomic categories. Check internet connexion and project ID')
     return df_annotations
 
+def delete_ecotaxa_duplicates(configuration=configuration,project_id=str(cfg_metadata['ecotaxa_lexplore_alga_flowcam_micro_projectid']),categories=['duplicate','part<other','bubble','artefact','ghost']):
+    with ecotaxa_py_client.ApiClient(configuration) as api_client:
+        # Create an instance of the API class
+        api_instance = ecotaxa_py_client.ObjectsApi(api_client)
+        project_id = int(project_id)  # int | Internal, numeric id of the project.
+        project_filters = ecotaxa_py_client.ProjectFilters()  # ProjectFilters |
+        fields = 'obj.orig_id,obj.objid,obj.classif_id'  # str |   Specify the needed object (and ancillary entities) fields.  It follows the naming convention 'prefix.field' : Prefix is either 'obj' for main object, 'fre' for free fields, 'img' for the visible image.  The column obj.imgcount contains the total count of images for the object.  Use a comma to separate fields.  💡 More help :  You can get the field labels by parsing the classiffieldlist returned by a call to https://ecotaxa.obs-vlfr.fr/api/docs#/projects/project_query_projects__project_id__get.  **Note that the following fields must be prefixed with the header \"obj.\"** (for example → obj.orig_id):  acquisid classif_auto_id, classif_auto_score, classif_auto_when, classif_crossvalidation_id, classif_id, classif_qual, classif_who, classif_when, complement_info, depth_max, depth_min, latitude, longitude, objdate, object_link, objid, objtime, orig_id, random_value, similarity, sunpos.  **Note that the following fields must be prefixed with the header \"img.\"** (for example → img.file_name):  file_name, height, imgid, imgrank, file_name, orig, objid, file_name thumb_file_name, thumb_height, thumb_width, width.  **Note that the following fields must be prefixed with the header \"txo.\"** (for example → txo.display_name):  creation_datetime, creator_email, display_name, id, id_instance, id_source, lastupdate_datetime, name, nbrobj, nbrobjcum, parent_id, rename_to source_desc, source_url, taxostatus, taxotype.  **All other fields must be prefixed by the header \"fre.\"** (for example → fre.circ.).                     (optional)
+        order_field = 'obj.objdate'  # str | Order the result using given field. If prefixed with \"-\" then it will be reversed. (optional)
+
+        try:
+            # Get Object Set
+            api_response = api_instance.get_object_set(project_id, project_filters, fields=fields, order_field=order_field, window_start=None,window_size=None)
+            df=pd.DataFrame(api_response.to_dict())
+            df_annotations=pd.DataFrame(list(df['details'].values.flat),columns=['object_filename','object_id','object_annotation_id'])
+            api_instance = ecotaxa_py_client.TaxonomyTreeApi(api_client)
+            dict_annotations = dict(map(lambda taxon_id: (taxon_id,api_instance.get_taxon_in_central(int(taxon_id))[0].display_name) if taxon_id > 0 else (None,None), df_annotations.object_annotation_id.dropna().unique()))
+            df_annotations['object_annotation']=df_annotations.object_annotation_id.map(dict_annotations)
+            df_discarded=df_annotations[df_annotations.object_annotation.isin(categories)]
+            df_discarded.object_annotation.unique()
+            api_instance_object = ecotaxa_py_client.ObjectsApi(api_client)
+            request_body = df_discarded.object_id.astype(int).to_list()  # List[int] |
+            api_response_object = api_instance_object.erase_object_set(request_body)
+
+        except Exception as e:
+            print("Error fetching ROI information. Please check your connection to Ecotaxa server")
+
+
+    return print('{}(s) erased'.format('(s), '.join(categories)))
+
+
+def export_ecotaxa_annotations(configuration=configuration,project_id=str(cfg_metadata['ecotaxa_lexplore_alga_flowcam_micro_projectid']),export_path=path_to_git / 'data' / 'datafiles' / 'ecotaxa' ):
+    with ecotaxa_py_client.ApiClient(configuration) as api_client:
+        # Create an instance of the API class
+        api_instance = ecotaxa_py_client.ObjectsApi(api_client)
+        project_id = int(project_id)  # int | Internal, numeric id of the project.
+        project_filters = ecotaxa_py_client.ProjectFilters()  # ProjectFilters |
+        fields = 'obj.orig_id,obj.objid,obj.classif_id'  # str |   Specify the needed object (and ancillary entities) fields.  It follows the naming convention 'prefix.field' : Prefix is either 'obj' for main object, 'fre' for free fields, 'img' for the visible image.  The column obj.imgcount contains the total count of images for the object.  Use a comma to separate fields.  💡 More help :  You can get the field labels by parsing the classiffieldlist returned by a call to https://ecotaxa.obs-vlfr.fr/api/docs#/projects/project_query_projects__project_id__get.  **Note that the following fields must be prefixed with the header \"obj.\"** (for example → obj.orig_id):  acquisid classif_auto_id, classif_auto_score, classif_auto_when, classif_crossvalidation_id, classif_id, classif_qual, classif_who, classif_when, complement_info, depth_max, depth_min, latitude, longitude, objdate, object_link, objid, objtime, orig_id, random_value, similarity, sunpos.  **Note that the following fields must be prefixed with the header \"img.\"** (for example → img.file_name):  file_name, height, imgid, imgrank, file_name, orig, objid, file_name thumb_file_name, thumb_height, thumb_width, width.  **Note that the following fields must be prefixed with the header \"txo.\"** (for example → txo.display_name):  creation_datetime, creator_email, display_name, id, id_instance, id_source, lastupdate_datetime, name, nbrobj, nbrobjcum, parent_id, rename_to source_desc, source_url, taxostatus, taxotype.  **All other fields must be prefixed by the header \"fre.\"** (for example → fre.circ.).                     (optional)
+        order_field = 'obj.objdate'  # str | Order the result using given field. If prefixed with \"-\" then it will be reversed. (optional)
+
+        try:
+            # Get Object Set
+            api_response = api_instance.get_object_set(project_id, project_filters, fields=fields, order_field=order_field, window_start=None,window_size=None)
+            df=pd.DataFrame(api_response.to_dict())
+            df_annotations=pd.DataFrame(list(df['details'].values.flat),columns=['object_filename','object_id','object_annotation_id'])
+            api_instance = ecotaxa_py_client.TaxonomyTreeApi(api_client)
+            df_taxonomy = pd.concat(map(lambda taxon_id: (res:=api_instance.query_taxa(int(taxon_id)).to_dict(),pd.DataFrame({'object_annotation_id':taxon_id,'object_annotation_name':res['display_name'],'object_annotation_lineage':'>'.join(res['lineage'][::-1])},index=[0]))[-1], df_annotations.object_annotation_id.dropna().unique())).reset_index(drop=True)
+            df_annotations=pd.merge(df_annotations,df_taxonomy,how='left',on=['object_annotation_id'])
+            export_path.mkdir(exist_ok=True,parents=True)
+            exported_file=str(export_path/'ecotaxa_{}_export_annotations_{}.csv'.format(str(project_id), datetime.datetime.utcnow().strftime("%Y%m%d")))
+            df_annotations.to_csv(exported_file,index=False)
+
+
+        except Exception as e:
+            print("Error fetching ROI information. Please check your connection to Ecotaxa server")
+            df_annotations=pd.DataFrame()
+            exported_file=None
+
+    return exported_file,df_annotations
 
 
 
@@ -787,17 +840,17 @@ def annotation_in_WORMS(hierarchy):
     :return: dataframe with corresponding rank, domain, phylum, class, order, family, genus, functional group, Taxon url, reference, citation, and URL for the annotation
     """
     hierarchy_levels = re.split('[<>]',hierarchy)
-    df_hierarchy = pd.DataFrame({'Ecotaxa_annotation_category': hierarchy, 'Full_hierarchy': hierarchy, 'Rank': '', 'Type': '', 'Domain': '', 'Phylum': '','Class': '', 'Order': '', 'Family': '', 'Genus': '', 'Functional_group': '', 'WORMS_ID': '', 'Reference': '','Citation': ''}, index=[0])
+    df_hierarchy = pd.DataFrame({'EcoTaxa_hierarchy': hierarchy, 'Full_hierarchy': '', 'Rank': '', 'Type': '', 'Domain': '', 'Phylum': '','Class': '', 'Order': '', 'Family': '', 'Genus': '', 'Functional_group': '', 'WORMS_ID': '', 'Reference': '','Citation': '','NCBI_link':'','NCBI_id':''}, index=[0])
     url = 'https://www.marinespecies.org/aphia.php?p=taxlist'
-    final_annotation = hierarchy_levels[::-1][0]
+
     for annotation in hierarchy_levels[::-1]:
         with HTMLSession() as session:
-
-            data={'searchpar':'0','tName':annotation,'contentEnableExtant':'0','contentEnableMarine':'0'}
+            data={'searchpar':'0','tName':annotation,'contentEnableExtant':'0','contentEnableMarine':'0','vOnly':'1'}
             # Turn marine only and extant only search off
             #session.post('https://www.marinespecies.org/aphia.php?p=search',data=data)
             taxon_list=session.post(url=url,data=data, headers={'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.0.0 Safari/537.36'})
             soup = BeautifulSoup(taxon_list.content, "lxml")
+
             if len(soup.find_all(class_="list-group-item")) == 0:  # If post results in a single page:
                 if len(soup.find_all(class_="alert alert-info")) > 0:
                     continue  # Skip current level if annotation not found
@@ -807,10 +860,11 @@ def annotation_in_WORMS(hierarchy):
                     script=''
                     annotation_webpage_with_attributes = session.get(urljoin(taxon_list.url, '#attributes'))
                     if annotation_webpage_with_attributes.ok:#len(list(filter(None,[id.get('id') if id.get('id') == "aphia_attributes_group_show" else id.get('href') if id.get('href') == '#attributes' else None for id in soup.findAll('a')]))) > 0:
-                        attributes_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                        attributes_soup =link_soup= BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
                         script = attributes_soup.find_all('script')
                         if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
                             if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()])==0:
+                                link_soup=attributes_soup
                                 attributes_soup = ''
                                 script = ''
             else: # If post result in a list of taxa
@@ -839,10 +893,11 @@ def annotation_in_WORMS(hierarchy):
                         script = ''
                         annotation_webpage_with_attributes = session.get(urljoin(annotation_webpage.url,'#attributes'))  # get_attributes_output(url='https://www.marinespecies.org/aphia.php?p=search&adv=1',id=annotation_webpage.url.split('id=')[-1])
                         if annotation_webpage_with_attributes.ok:#len(list(filter(None,[id.get('id') if id.get('id') == "aphia_attributes_group_show" else id.get('href') if id.get('href') == '#attributes' else None for id in taxo_soup.findAll('a')]))) > 0:  # taxo_soup.findAll('a',onclick=True)[0].get('id')=="aphia_attributes_group_show":
-                            attributes_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                            attributes_soup=link_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
                             script = attributes_soup.find_all('script')
                             if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
                                 if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()])==0:
+                                    link_soup = attributes_soup
                                     attributes_soup = ''
                                     script = ''
                     else:
@@ -851,10 +906,11 @@ def annotation_in_WORMS(hierarchy):
                         time.sleep(5)
                         annotation_webpage_with_attributes = session.get(urljoin(annotation_webpage.url, '#attributes'),timeout=5)  # get_attributes_output(url='https://www.marinespecies.org/aphia.php?p=search&adv=1',id=annotation_webpage.url.split('id=')[-1])
                         if annotation_webpage_with_attributes.ok:#len(list(filter(None,[id.get('id') if id.get('id') == "aphia_attributes_group_show" else id.get('href') if id.get('href') == '#attributes' else None for id in taxo_soup.findAll('a')]))) > 0:
-                            attributes_soup=BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                            attributes_soup=link_soup=BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
                             script = attributes_soup.find_all('script')
                             if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
                                 if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()])==0:
+                                    link_soup = attributes_soup
                                     attributes_soup = ''
             fields = [item.getText() if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else '' for item in taxo_soup.find_all(class_="col-xs-12 col-sm-4 col-lg-2 control-label")]
             Status = re.sub(r'[' + '\n' + '\xa0' + ']', '',taxo_soup.find_all(class_="leave_image_space")[fields.index('Status')].getText()) if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
@@ -883,10 +939,11 @@ def annotation_in_WORMS(hierarchy):
                             script = ''
                             annotation_webpage_with_attributes = session.get(urljoin(taxon_list.url, '#attributes'),stream=True)  # get_attributes_output(url='https://www.marinespecies.org/aphia.php?p=search&adv=1',id=annotation_webpage.url.split('id=')[-1])
                             if annotation_webpage_with_attributes.ok:#len(list(filter(None,[id.get('id') if id.get('id') == "aphia_attributes_group_show" else id.get('href') if id.get('href') == '#attributes' else None for id in soup.findAll('a')]))) > 0:
-                                attributes_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                                attributes_soup=link_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
                                 script = attributes_soup.find_all('script')
                                 if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
                                     if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[ 0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()]) == 0:
+                                        link_soup = attributes_soup
                                         attributes_soup = ''
                                         script = ''
                     else:
@@ -896,15 +953,18 @@ def annotation_in_WORMS(hierarchy):
                         attributes_soup = ''
                         annotation_webpage_with_attributes = session.get(urljoin(annotation_webpage.url, '#attributes'))  # get_attributes_output(url='https://www.marinespecies.org/aphia.php?p=search&adv=1',id=annotation_webpage.url.split('id=')[-1])
                         if annotation_webpage_with_attributes.ok: #taxo_soup.findAll('a', onclick=True)[0].get('id') == "aphia_attributes_group_show":
-                            attributes_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
+                            attributes_soup=link_soup = BeautifulSoup(annotation_webpage_with_attributes.content, 'lxml')
                             script = attributes_soup.find_all('script')
                             if len(attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})):
                                 if 'No attributes found on lower taxonomic level' in attributes_soup.findAll(attrs={'id': 'aphia_attributes_group'})[0].getText() or len([item.getText() for item in script if 'Functional group' in item.getText()])==0:
+                                    link_soup = attributes_soup
                                     attributes_soup = ''
                     fields = [item.getText() if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else '' for item in taxo_soup.find_all(class_="col-xs-12 col-sm-4 col-lg-2 control-label")]
 
             Functional_group =[item.getText()[substring.start():]  for item in script for substring in re.finditer('Functional group', item.getText()) if 'Functional group' in item.getText()]
             Functional_group = ';'.join([str({'Functional group':group[group.find('Functional group') + 22:[sub.start() for sub in re.finditer('&nbsp', group) if sub.start() > group.find('Functional group') + 22 and sub.start()>group.find('nodes')][0]].replace(group[[sub.start() for sub in re.finditer('&nbsp', group) if sub.start() > group.find('Functional group') + 22 ][0]:[sub.start() for sub in re.finditer('&nbsp', group) if sub.start() > group.find('nodes') + 22 ][0]],''),group.split('&nbsp;" ,state: "" ,nodes: [{ text: "<b>')[1].split('<\\/b> ')[0] :group.split('&nbsp;" ,state: "" ,nodes: [{ text: "<b>')[1].split('<\\/b> ')[1].split('&nbsp')[0]}) if group.find('&nbsp;" ,state: "" ,nodes: [{ text: "<b>')!=-1 else str({'Functional group':group[group.find('Functional group') + 22:[sub.start() for sub in re.finditer('&nbsp', group) if sub.start() > group.find('Functional group') + 22][0]]}) for group in Functional_group])
+            NCBI_link=max([link['href']  if 'www.ncbi.nlm.nih' in link['href'] else ''  for link in (link_soup.findAll(attrs={'id': 'links'})[0]).findAll('a', href=True)]) if any(link_soup.findAll(attrs={'id': 'links'}))  else ''
+            NCBI_ID=NCBI_link.split('=')[-2].replace('&lvl','') if len(NCBI_link) else pd.NA
             Type = np.where(taxo_soup.find_all(class_="leave_image_space")[1].getText().split('\n')[1] == 'Biota','Living', 'NA').tolist() if len( taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
             dict_hierarchy = {re.sub(r'[' + string.punctuation + ']', '', level.split('\xa0')[1]): level.split('\xa0')[0] for level in taxo_soup.find_all(class_="leave_image_space")[1].getText().split('\n') if '\xa0' in level} if len( taxo_soup.find_all(class_="alert alert-info")) == 0 else dict({'': ''})
             full_hierarchy = '>'.join([level.split('\xa0')[0] + level.split('\xa0')[1] for level in taxo_soup.find_all(class_="leave_image_space")[1].getText().split('\n') if '\xa0' in level]) if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
@@ -918,7 +978,7 @@ def annotation_in_WORMS(hierarchy):
             URL = re.sub(r'[' + '(' + ')' + ']', '',taxo_soup.find_all(class_="aphia_core_cursor-help")[fields.index('AphiaID')].getText()) if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
             Original_reference = taxo_soup.find_all(class_="correctHTML")[0].getText() if len(taxo_soup.find_all(class_="correctHTML")) > 0 else ''
             Taxonomic_citation = [re.sub(r'[' + '\n' + ' ' + ']', '', item.getText()) for item in taxo_soup.find_all(class_="col-xs-12 col-sm-8 col-lg-10 pull-left") if item.attrs['id'] == 'Citation'][0] if len(taxo_soup.find_all(class_="alert alert-info")) == 0 else ''
-            df_hierarchy = pd.DataFrame({'Ecotaxa_annotation_category': final_annotation,'Ecotaxa_annotation_hierarchy':hierarchy,'Full_hierarchy': full_hierarchy, 'Rank': Rank,'Type': Type,'Domain': Domain,'Phylum': Phylum, 'Class': Class,'Order': Order, 'Family': Family, 'Genus': Genus,'Functional_group': Functional_group if len(Functional_group) > 0 else '','WORMS_ID': URL,'Reference': Original_reference,'Citation': Taxonomic_citation}, index=[0])
+            df_hierarchy = pd.DataFrame({'EcoTaxa_hierarchy': hierarchy,'Full_hierarchy': full_hierarchy, 'Rank': Rank,'Type': Type,'Domain': Domain,'Phylum': Phylum, 'Class': Class,'Order': Order, 'Family': Family, 'Genus': Genus,'Functional_group': Functional_group if len(Functional_group) > 0 else '','WORMS_ID': URL,'Reference': Original_reference,'Citation': Taxonomic_citation,'NCBI_link':NCBI_link,'NCBI_id':NCBI_ID}, index=[0])
             break
     return df_hierarchy
 
