@@ -66,18 +66,17 @@ else:
 dict_properties_visual_spreadsheet={'Name':['[t]'], 'Area (ABD)':['[f]'], 'Area (Filled)':['[f]'], 'Aspect Ratio':['[f]'], 'Average Blue':['[f]'],
        'Average Green':['[f]'], 'Average Red':['[f]'], 'Calibration Factor':['[f]'],
        'Calibration Image':['[f]'], 'Capture ID':['[t]'] ,'Capture X':['[f]'], 'Capture Y':['[f]'], 'Circularity':['[f]'],
-       'Circularity (Hu)':['[f]'], 'Compactness':['[f]'], 'Convex Perimeter':['[f]'], 'Convexity':['[f]'],
-       'Date':['[t]'], 'Diameter (ABD)':['[f]'], 'Diameter (ESD)':['[f]'], 'Diameter (FD)':['[f]'],
+       'Circularity (Hu)':['[f]'], 'Compactness':['[f]'], 'Convex Perimeter':['[f]'], 'Convexity':['[f]'], 'Diameter (ABD)':['[f]'], 'Diameter (ESD)':['[f]'], 'Diameter (FD)':['[f]'],
        'Edge Gradient':['[f]'], 'Elapsed Time':['[f]'], 'Elongation':['[f]'], 'Feret Angle Max':['[f]'],
        'Feret Angle Min':['[f]'], 'Fiber Curl':['[f]'], 'Fiber Straightness':['[f]'], 'Filter Score':['[f]'],
        'Geodesic Aspect Ratio':['[f]'], 'Geodesic Length':['[f]'], 'Geodesic Thickness':['[f]'],
        'Group ID':['[t]'], 'Image Height':['[f]'], 'Image Width':['[f]'], 'Image X':['[f]'], 'Image Y':['[f]'],
        'Length':['[f]'], 'Particles Per Chain':['[f]'], 'Perimeter':['[f]'], 'Ratio Blue/Green':['[f]'],
        'Ratio Red/Blue':['[f]'], 'Ratio Red/Green':['[f]'], 'Roughness':['[f]'], 'Source Image':['[f]'],
-       'Sum Intensity':['[f]'], 'Symmetry':['[f]'], 'Time':['[t]'], 'Transparency':['[f]'], 'Volume (ABD)':['[f]'],
+       'Sum Intensity':['[f]'], 'Symmetry':['[f]'],  'Transparency':['[f]'], 'Volume (ABD)':['[f]'],
        'Width':['[f]']}
 #Define a metadata table for Lexplore based on the metadata confiugration file
-df_sample=pd.DataFrame({'sample_longitude':['[f]',-999],'sample_latitude':['[f]',-999],'sample_platform':['[t]','lab'],'sample_project':['[t]','sinking'],'sample_type':['[t]','culture'] })
+df_sample=pd.DataFrame({'sample_longitude':['[f]',0],'sample_latitude':['[f]',0],'sample_platform':['[t]','lab'],'sample_project':['[t]','sinking'],'sample_type':['[t]','culture'] })
 df_acquisition=pd.DataFrame({'acq_instrument':['[t]','Flowcam_8000'],'acq_pumptype':['[t]','syringe'],'acq_pixel_um':['[f]',cfg_metadata['pixel_size_flowcam_10x']],'acq_frequency_fps':['[f]',1],'acq_max_width_um':['[f]',100],'acq_max_height_um':['[f]',300]})
 df_processing=pd.DataFrame({'process_code':['[t]','https://github.com/mdugenne/Lexplore_ALGA/scripts/script_flowcam_sinking'],'process_min_diameter_um':['[f]',10],'process_max_diameter_um':['[f]',100]})
 
