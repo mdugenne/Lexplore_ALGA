@@ -45,7 +45,7 @@ df_properties_all=pd.DataFrame()
 df_volume=pd.DataFrame()
 df_nbss=pd.DataFrame()
 df_path=pd.DataFrame(natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*')))))))))
-for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))è:
+for sample in natsorted(list(set(list(mosaicfiles.keys()))-set(natsorted(list(map(lambda path: path.stem,list(Path(path_to_network /'Imaging_Flowcam' / 'Flowcam data' / 'Lexplore' / 'ecotaxa' ).expanduser().glob('Flowcam_*_lexplore*'))))))))[184:186]:
     sample_id=sample
     path_to_data = mosaicfiles[sample][0].parent / str(sample + '.csv')
     path_to_ecotaxa = Path(str(mosaicfiles[sample][0]).replace('acquisitions', 'ecotaxa')).expanduser().parent
@@ -401,7 +401,7 @@ df_zip=pd.DataFrame(zip_files).assign(sample_id=lambda x: x[0].astype(str).str.s
 project_list=[str(cfg_metadata['ecotaxa_'+project+'_projectid']) for project in df_metadata.Ecotaxa_project.str.lower().unique()]
 df_samples=check_ecotaxa_sample(ecotaxa_configuration=configuration,project_id=project_list)
 df_zip=pd.merge(df_zip,df_samples,how='left',on='sample_id')
-for file in df_zip.loc[df_zip.sample_id.isin(df_samples.sample_id.unique())==False,0].unique():
+for file in df_zip.loc[df_zip.sample_id.isin(df_samples.sample_id.unique())==False,0].unique()[::-1]:
     try:
         project=int(project_list[0]) if 'Flowcam_10x_' in file.stem else int(project_list[1])
         print('Trying to upload {}, please wait'.format(file.stem))
