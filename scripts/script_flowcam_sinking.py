@@ -31,7 +31,7 @@ from plotnine import *
 path_to_dir=Path('~/GIT/Lexplore_ALGA/data/datafiles/flowcam/sinking').expanduser()
 os.chdir(path_to_dir)
 sys.path.append(str(path_to_dir))
-from funcs_image_utils import *
+from funcs_image_utils_sinking import *
 import shutil
 
 '''
